@@ -22,6 +22,8 @@ video:
 
 audio:
   enabled: true
+  # Accepts either a HuggingFace hub id OR a local directory path (e.g. the
+  # `merged/` output of scripts/train_audio.py after ASVspoof fine-tuning).
   model_id: MelodyMachine/Deepfake-audio-detection
   sample_rate: 16000
   # If segment has < min_voiced_ratio voiced content, mark unknown.

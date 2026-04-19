@@ -33,3 +33,9 @@ timm>=0.9
 # Web UI
 gradio>=4.44
 plotly>=5.20
+
+# Fine-tuning (optional — only needed for scripts/train_audio.py etc.)
+peft>=0.10
+accelerate>=0.30
+datasets>=2.18
+pandas>=2.1

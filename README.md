@@ -202,6 +202,119 @@ Reports:
 
 ---
 
+## Fine-tuning on ASVspoof 2019 LA (audio branch)
+
+The pretrained audio model (`MelodyMachine/Deepfake-audio-detection`)
+is a general-purpose spoof detector. On ASVspoof 2019 LA eval you can
+typically cut EER by 3-10x by fine-tuning on the matched distribution.
+
+### 1. Expected dataset layout
+
+After you accept the EULA at
+<https://datashare.ed.ac.uk/handle/10283/3336> and extract the tarballs,
+point the prepare script at the root directory containing:
+
+```
+ASVspoof2019_LA/
+├── ASVspoof2019_LA_train/flac/LA_T_*.flac
+├── ASVspoof2019_LA_dev/flac/LA_D_*.flac
+├── ASVspoof2019_LA_eval/flac/LA_E_*.flac
+└── ASVspoof2019_LA_cm_protocols/
+    ├── ASVspoof2019.LA.cm.train.trn.txt
+    ├── ASVspoof2019.LA.cm.dev.trl.txt
+    └── ASVspoof2019.LA.cm.eval.trl.txt
+```
+
+### 2. Moving data from your laptop to a cloud GPU
+
+If the data lives on your local disk but you're training on a rented GPU:
+
+```bash
+# Lambda Labs / Vast / most Linux cloud boxes:
+rsync -avz --progress /mnt/c/path/to/ASVspoof2019_LA/ \
+    user@<cloud-ip>:/data/ASVspoof2019_LA/
+
+# Google Cloud:
+gsutil -m cp -r /mnt/c/path/to/ASVspoof2019_LA gs://<bucket>/
+gcloud compute scp --recurse /local/path <instance>:/data/
+
+# Or tar + scp for smaller transfer overhead:
+tar -C /path/to -cf - ASVspoof2019_LA | \
+    ssh user@<cloud-ip> "tar -C /data -xf -"
+```
+
+The full LA set is ~30 GB — expect 30-90 min on a reasonable home connection.
+
+### 3. Build manifests
+
+```bash
+python scripts/prepare_asvspoof.py \
+    --root /data/ASVspoof2019_LA \
+    --out-dir data/asvspoof
+```
+
+This writes `data/asvspoof/asvspoof_{train,dev,eval}.csv` with
+`(file_path, label, spoof_type, speaker_id, split)` rows. Use
+`--check-only` to validate the layout without writing anything.
+
+### 4. Train (LoRA fine-tune)
+
+```bash
+python scripts/train_audio.py \
+    --manifest-dir data/asvspoof \
+    --output-dir checkpoints/audio-asvspoof-lora \
+    --epochs 6 \
+    --batch-size 32 \
+    --lr 3e-4 \
+    --bf16            # or --fp16 on pre-Ampere GPUs
+```
+
+Trainable params with defaults: ~0.5% of the base model. Typical
+A100 wall-clock: ~2–3 hours for 6 epochs. Best checkpoint (by dev EER)
+is restored at the end.
+
+Pass `--full-finetune` to update all weights instead (needs ~16 GB VRAM
+at batch size 16, ~1.5x slower, usually 1–2 pp better EER).
+
+### 5. Evaluate on the eval split
+
+```bash
+python scripts/eval_audio.py \
+    --model-path checkpoints/audio-asvspoof-lora/merged \
+    --manifest data/asvspoof/asvspoof_eval.csv \
+    --out out/audio_eval.json
+```
+
+Reports EER, ROC-AUC, PR-AUC, and per-attack (A07–A19) EER breakdown.
+
+### 6. Plug into the inference pipeline
+
+Edit `configs/default.yaml`:
+
+```yaml
+audio:
+  model_id: /abs/path/to/checkpoints/audio-asvspoof-lora/merged
+```
+
+Then run `scripts/run_inference.py` or `python app.py` as normal — the
+pipeline loads your fine-tuned weights with no code changes.
+
+### Expected numbers (rough guide)
+
+Published Wav2Vec2-based ASVspoof 2019 LA EER figures land around:
+
+| Setup | Eval EER |
+|---|---|
+| Off-the-shelf general spoof detector (no FT) | 15-30% |
+| Our LoRA fine-tune, 6 epochs, base Wav2Vec2 | ~3-6% |
+| Full fine-tune + AAM-softmax + aug | ~1-3% |
+
+Your numbers will vary with base model, batch size, and augmentation.
+Don't chase SOTA on the first run — get the loop working end-to-end, then
+iterate.
+
+---
+
 ## Limitations & honest notes
 
 - The off-the-shelf HF models are **general-purpose** deepfake detectors.

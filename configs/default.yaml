@@ -1,0 +1,40 @@
+# Default configuration for the segment-level deepfake detector.
+# Swap model IDs to any HuggingFace image-/audio-classification model
+# with {real, fake} style labels. The pipeline normalizes label spelling.
+
+segment_seconds: 1.0          # window size
+segment_stride_seconds: 1.0   # hop size; set < segment_seconds for overlap
+
+video:
+  enabled: true
+  model_id: prithivMLmods/Deep-Fake-Detector-Model
+  # How many frames per 1s segment to score. 4-8 is a good quality/speed trade.
+  frames_per_segment: 5
+  # Face detection
+  face_detector: mtcnn
+  face_min_size: 60          # pixels
+  face_margin: 0.2
+  face_select: largest       # {largest, all}
+  # Scoring
+  aggregate: mean            # {mean, max, median} across frames in a segment
+  # Fallback if no face found in the segment
+  no_face_strategy: skip     # {skip, use_full_frame, mark_unknown}
+
+audio:
+  enabled: true
+  model_id: MelodyMachine/Deepfake-audio-detection
+  sample_rate: 16000
+  # If segment has < min_voiced_ratio voiced content, mark unknown.
+  min_voiced_ratio: 0.05
+
+fusion:
+  # Late-fusion strategy: weighted average of calibrated probabilities.
+  strategy: weighted_average
+  video_weight: 0.6
+  audio_weight: 0.4
+  # Threshold for the final "tampered" flag.
+  threshold: 0.5
+
+output:
+  save_face_crops: false     # set true to dump face thumbs per segment
+  save_audio_clips: false

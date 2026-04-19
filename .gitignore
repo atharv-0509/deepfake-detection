@@ -1,0 +1,70 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.Python
+
+# --- Virtual envs ---
+.venv/
+venv/
+env/
+ENV/
+
+# --- IDEs / OS ---
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# --- Build / packaging ---
+build/
+dist/
+*.egg
+
+# --- Tests / coverage ---
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# --- Project outputs / caches ---
+# JSON reports, face crops from CLI runs
+out/
+# downloaded sample videos
+samples/
+.cache/
+*.log
+
+# Pretrained model weights downloaded at runtime (HuggingFace cache).
+# These re-download automatically; no need to commit.
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.onnx
+
+# Gradio runtime artifacts
+gradio_cached_examples/
+flagged/
+.gradio/
+
+# Temporary pipeline workdirs
+dfdet_*/
+crops_*/
+
+# Large media — avoid accidentally committing test videos
+*.mp4
+*.mov
+*.mkv
+*.avi
+*.webm
+*.wav
+*.flac
+*.mp3
+
+# Datasets
+data/
+datasets/

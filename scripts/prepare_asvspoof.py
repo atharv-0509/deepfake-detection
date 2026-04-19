@@ -12,10 +12,15 @@ Expected layout (the canonical one shipped by Datashare):
         ├── ASVspoof2019.LA.cm.dev.trl.txt
         └── ASVspoof2019.LA.cm.eval.trl.txt
 
-Each protocol line looks like:
+Each protocol line has 5 whitespace-separated columns:
+
+    SPEAKER_ID  FILE_NAME  -  SYSTEM_ID  KEY
+
+where column 3 is always "-" (a padding/environment column, unused in LA)
+and SYSTEM_ID is "-" for bonafide and A01..A19 for spoof. Examples:
 
     LA_0079 LA_T_1138215 - - bonafide
-    LA_0079 LA_T_1235126 A06 - spoof
+    LA_0079 LA_T_1235126 - A06 spoof
 
 This script writes CSVs with one row per utterance:
 
@@ -76,16 +81,30 @@ def parse_protocol(path: Path) -> Iterable[dict]:
                     f"{path}:{lineno}: expected 5 whitespace-separated fields, "
                     f"got {len(parts)}: {raw!r}"
                 )
-            speaker_id, file_id, system_id, _key, label = parts
+            # ASVspoof 2019 LA protocol columns:
+            #   0: speaker_id    (LA_####)
+            #   1: file_id       (LA_{T,D,E}_#######)
+            #   2: "-"           (padding; environment col, unused in LA)
+            #   3: system_id     ("-" for bonafide, A01..A19 for spoof)
+            #   4: label         ("bonafide" or "spoof")
+            speaker_id, file_id, _pad, system_id, label = parts
             if label not in ("bonafide", "spoof"):
                 raise ValueError(
                     f"{path}:{lineno}: unexpected label {label!r}; "
                     "expected 'bonafide' or 'spoof'"
                 )
+            # Sanity-check: for spoof rows system_id should look like A##.
+            if label == "spoof" and not (
+                len(system_id) == 3 and system_id.startswith("A") and system_id[1:].isdigit()
+            ):
+                raise ValueError(
+                    f"{path}:{lineno}: spoof row has unexpected system_id "
+                    f"{system_id!r}; expected 'A01'..'A19'. Full line: {raw!r}"
+                )
             yield {
                 "file_id": file_id,
                 "speaker_id": speaker_id,
-                "spoof_type": system_id if system_id != "-" else "bonafide",
+                "spoof_type": system_id if label == "spoof" else "bonafide",
                 "label_str": label,
                 "label": 1 if label == "spoof" else 0,
             }

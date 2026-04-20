@@ -18,25 +18,24 @@ video:
   # Scoring
   aggregate: mean            # {mean, max, median} across frames in a segment
   # Fallback if no face found in the segment
-  no_face_strategy: skip     # {skip, use_full_frame, mark_unknown}
+  no_face_strategy: mark_unknown     # {skip, use_full_frame, mark_unknown}
 
 audio:
   enabled: true
   # Accepts either a HuggingFace hub id OR a local directory path (e.g. the
   # `merged/` output of scripts/train_audio.py after ASVspoof fine-tuning).
-  model_id: MelodyMachine/Deepfake-audio-detection
+  model_id: /mnt/c/Users/HP/Downloads/Deepfake detection/checkpoints/audio-asvspoof-lora/merged
   sample_rate: 16000
   # If segment has < min_voiced_ratio voiced content, mark unknown.
-  min_voiced_ratio: 0.05
+  min_voiced_ratio: 0.0
 
 fusion:
   # Late-fusion strategy: weighted average of calibrated probabilities.
   strategy: weighted_average
-  video_weight: 0.6
-  audio_weight: 0.4
+  video_weight: 0.8
+  audio_weight: 0.2
   # Threshold for the final "tampered" flag.
-  threshold: 0.5
+  threshold: 0.30
 
 output:
-  save_face_crops: false     # set true to dump face thumbs per segment
-  save_audio_clips: false
+  save_face_crops: true      # set true to dump face 

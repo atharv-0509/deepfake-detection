@@ -120,6 +120,22 @@ class VideoAudioSegmenter:
         with av.open(str(self.video_path)) as container:
             stream = container.streams.video[0]
             time_base = float(stream.time_base) if stream.time_base else 1 / 25
+
+            # Phone/WhatsApp videos store orientation as a metadata tag rather
+            # than baking rotation into the pixels. PyAV does NOT auto-apply
+            # this, so we read it once and rotate each frame post-decode.
+            # Without this, portrait phone videos come out sideways/upside-down
+            # and face-classification models (trained on upright faces) flag
+            # every frame as "fake".
+            rotate_k = 0
+            try:
+                rot_str = stream.metadata.get("rotate")
+                if rot_str is not None:
+                    # Metadata is clockwise degrees; np.rot90 is CCW, so negate.
+                    deg = int(rot_str) % 360
+                    rotate_k = (-deg // 90) % 4
+            except (ValueError, TypeError):
+                rotate_k = 0
             # Seek to slightly before t_start to get the keyframe.
             seek_pts = int(max(0.0, t_start - 0.2) / time_base)
             try:
@@ -146,6 +162,8 @@ class VideoAudioSegmenter:
                     break
                 if target_idx < len(targets) and t >= targets[target_idx]:
                     arr = frame.to_ndarray(format="rgb24")
+                    if rotate_k:
+                        arr = np.rot90(arr, k=rotate_k).copy()
                     frames.append(arr)
                     target_idx += 1
                 if len(frames) >= want:
@@ -161,7 +179,10 @@ class VideoAudioSegmenter:
                     if t >= t_end:
                         break
                     if t >= t_start:
-                        frames.append(frame.to_ndarray(format="rgb24"))
+                        arr = frame.to_ndarray(format="rgb24")
+                        if rotate_k:
+                            arr = np.rot90(arr, k=rotate_k).copy()
+                        frames.append(arr)
                         if len(frames) >= want:
                             break
             return frames

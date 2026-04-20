@@ -68,3 +68,6 @@ crops_*/
 # Datasets
 data/
 datasets/
+
+# Local model checkpoints (re-download from Kaggle / Hugging Face)
+checkpoints/

@@ -26,6 +26,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--config", default="configs/default.yaml", help="YAML config.")
     p.add_argument("--out", default=None, help="Output JSON path.")
     p.add_argument("--device", default=None, help="Override torch device (cpu, cuda, mps).")
+    p.add_argument("--crops-dir", default=None,
+                   help="If set, dump the best face crop per segment as JPEGs here.")
     p.add_argument("--no-progress", action="store_true")
     p.add_argument("--log-level", default="INFO")
     return p.parse_args()
@@ -37,7 +39,11 @@ def main() -> int:
 
     cfg = PipelineConfig.from_yaml(args.config)
     pipe = DeepfakePipeline(cfg, device=args.device)
-    result = pipe.run(args.video, progress=not args.no_progress)
+    result = pipe.run(
+        args.video,
+        progress=not args.no_progress,
+        face_crops_dir=args.crops_dir,
+    )
 
     out_path = Path(args.out) if args.out else Path(args.video).with_suffix(".timeline.json")
     out_path.parent.mkdir(parents=True, exist_ok=True)

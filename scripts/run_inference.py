@@ -17,7 +17,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from src.pipeline import DeepfakePipeline, PipelineConfig  # noqa: E402
-from src.utils import setup_logging  # noqa: E402
+from src.utils import normalize_video_for_pipeline, setup_logging  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -28,6 +28,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--device", default=None, help="Override torch device (cpu, cuda, mps).")
     p.add_argument("--crops-dir", default=None,
                    help="If set, dump the best face crop per segment as JPEGs here.")
+    p.add_argument("--no-normalize", action="store_true",
+                   help="Skip the ffmpeg pre-normalization step. Only use if "
+                        "you know your input is already H.264 with pixels upright.")
     p.add_argument("--no-progress", action="store_true")
     p.add_argument("--log-level", default="INFO")
     return p.parse_args()
@@ -37,10 +40,14 @@ def main() -> int:
     args = parse_args()
     setup_logging(args.log_level)
 
+    # Normalize codec + rotation up front so the pipeline never sees a
+    # weird iPhone / WhatsApp / YouTube file. Skip only when the user opts out.
+    video_in = args.video if args.no_normalize else normalize_video_for_pipeline(args.video)
+
     cfg = PipelineConfig.from_yaml(args.config)
     pipe = DeepfakePipeline(cfg, device=args.device)
     result = pipe.run(
-        args.video,
+        video_in,
         progress=not args.no_progress,
         face_crops_dir=args.crops_dir,
     )

@@ -34,7 +34,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from src.pipeline import DeepfakePipeline, PipelineConfig  # noqa: E402
-from src.utils import get_device, setup_logging  # noqa: E402
+from src.utils import get_device, normalize_video_for_pipeline, setup_logging  # noqa: E402
 
 setup_logging("INFO")
 
@@ -217,6 +217,9 @@ def analyze(
         yield _empty_outputs("_Upload a video to begin._")
         return
 
+    progress(0.01, desc="Normalizing video (rotation + codec)…")
+    video_path = normalize_video_for_pipeline(video_path)
+
     progress(0.02, desc="Loading config…")
     cfg = PipelineConfig.from_yaml(str(_ROOT / "configs" / "default.yaml"))
     cfg.fusion.threshold = float(threshold)
@@ -283,13 +286,13 @@ def build_ui() -> gr.Blocks:
                 video_in = gr.Video(label="Input video", sources=["upload"], height=280)
                 run_btn = gr.Button("🔍 Analyze", variant="primary", size="lg")
                 threshold = gr.Slider(
-                    0.0, 1.0, value=0.5, step=0.01,
+                    0.0, 1.0, value=0.30, step=0.01,
                     label="Decision threshold",
                     info="Drag after analysis to re-flag without re-running.",
                 )
                 with gr.Accordion("Advanced settings", open=False):
-                    video_w = gr.Slider(0.0, 1.0, value=0.6, step=0.05, label="Video weight")
-                    audio_w = gr.Slider(0.0, 1.0, value=0.4, step=0.05, label="Audio weight")
+                    video_w = gr.Slider(0.0, 1.0, value=0.8, step=0.05, label="Video weight")
+                    audio_w = gr.Slider(0.0, 1.0, value=0.2, step=0.05, label="Audio weight")
                     fps_seg = gr.Slider(
                         1, 15, value=5, step=1,
                         label="Frames scored per segment",

@@ -51,6 +51,54 @@ def check_ffmpeg() -> None:
         )
 
 
+def normalize_video_for_pipeline(video_path: str | Path) -> str:
+    """Transcode any video to H.264 + AAC with rotation baked into pixels.
+
+    This guards against three common upload failure modes:
+      - Rotation metadata (iPhone 14+ `display_matrix`, WhatsApp, older
+        iPhones) — ffmpeg auto-applies rotation on re-encode. Without
+        this, frames decode rotated and face classifiers flag them fake.
+      - VP9 (YouTube downloads) and HEVC (modern iPhone) — some decoders
+        and the Gradio player reject these.
+      - Weird containers / variable framerate / missing moov atoms.
+
+    If ffmpeg isn't on PATH or the transcode fails, returns the original
+    path so downstream code at least attempts to proceed.
+    """
+    import subprocess
+    import tempfile
+    import uuid
+
+    if not video_path:
+        return str(video_path)
+
+    out_path = Path(tempfile.gettempdir()) / f"dfdet_norm_{uuid.uuid4().hex[:8]}.mp4"
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", str(video_path),
+        "-c:v", "libx264",
+        "-preset", "ultrafast",
+        "-crf", "23",
+        "-c:a", "aac",
+        "-b:a", "128k",
+        "-movflags", "+faststart",
+        str(out_path),
+    ]
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, timeout=180)
+        logger.info("Normalized upload -> %s", out_path)
+        return str(out_path)
+    except FileNotFoundError:
+        logger.warning("ffmpeg not found on PATH — skipping normalization.")
+        return str(video_path)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+        logger.warning(
+            "Normalization transcode failed (%s) — falling back to original.",
+            type(e).__name__,
+        )
+        return str(video_path)
+
+
 def probe_duration(path: str | Path) -> float:
     """Return duration (seconds) of a media file via ffprobe."""
     cmd = [

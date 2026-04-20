@@ -51,13 +51,67 @@ def check_ffmpeg() -> None:
         )
 
 
+def probe_rotation_degrees(video_path: str | Path) -> int:
+    """Return the display rotation (degrees clockwise) for a video.
+
+    Handles both legacy `stream.tags.rotate` and modern side-data
+    `rotation` entries (iPhone 14+, WhatsApp, newer Android). Returns 0
+    if ffprobe is missing or no rotation is recorded.
+    """
+    try:
+        cmd = [
+            "ffprobe", "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream_tags=rotate:side_data=rotation",
+            "-of", "default=nw=1",
+            str(video_path),
+        ]
+        out = subprocess.check_output(cmd, text=True, timeout=30)
+    except Exception:
+        return 0
+
+    # Parse lines like: "TAG:rotate=90" and/or "rotation=-180"
+    deg = 0
+    for line in out.splitlines():
+        line = line.strip().lower()
+        if "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        key = key.strip()
+        val = val.strip()
+        if key in ("tag:rotate", "rotate", "rotation"):
+            try:
+                deg = int(float(val))
+                break  # first match wins; all frames share the same rotation
+            except ValueError:
+                continue
+    # Normalize to 0..359 clockwise
+    return ((deg % 360) + 360) % 360
+
+
+def _transpose_filter_for_rotation(deg: int) -> Optional[str]:
+    """Translate a clockwise rotation into an ffmpeg -vf transpose chain."""
+    deg = ((deg % 360) + 360) % 360
+    if deg == 0:
+        return None
+    if deg == 90:
+        return "transpose=1"               # 90 clockwise
+    if deg == 180:
+        return "transpose=2,transpose=2"   # flip 180 via two CCW
+    if deg == 270:
+        return "transpose=2"               # 90 counter-clockwise
+    return None  # non-orthogonal; leave to ffmpeg's autorotate
+
+
 def normalize_video_for_pipeline(video_path: str | Path) -> str:
     """Transcode any video to H.264 + AAC with rotation baked into pixels.
 
     This guards against three common upload failure modes:
       - Rotation metadata (iPhone 14+ `display_matrix`, WhatsApp, older
-        iPhones) — ffmpeg auto-applies rotation on re-encode. Without
-        this, frames decode rotated and face classifiers flag them fake.
+        iPhones). We probe the rotation ourselves with ffprobe (covering
+        both stream tags AND side-data), apply an explicit transpose
+        filter, then strip the rotation tag so downstream decoders don't
+        double-rotate.
       - VP9 (YouTube downloads) and HEVC (modern iPhone) — some decoders
         and the Gradio player reject these.
       - Weird containers / variable framerate / missing moov atoms.
@@ -65,20 +119,29 @@ def normalize_video_for_pipeline(video_path: str | Path) -> str:
     If ffmpeg isn't on PATH or the transcode fails, returns the original
     path so downstream code at least attempts to proceed.
     """
-    import subprocess
-    import tempfile
     import uuid
 
     if not video_path:
         return str(video_path)
 
+    src = Path(video_path)
+    rotation = probe_rotation_degrees(src)
+    logger.info("probe_rotation_degrees(%s) = %d", src.name, rotation)
+
     out_path = Path(tempfile.gettempdir()) / f"dfdet_norm_{uuid.uuid4().hex[:8]}.mp4"
-    cmd = [
-        "ffmpeg", "-y",
-        "-i", str(video_path),
+    cmd = ["ffmpeg", "-y", "-i", str(src)]
+
+    vf = _transpose_filter_for_rotation(rotation)
+    if vf:
+        cmd += ["-vf", vf]
+
+    cmd += [
         "-c:v", "libx264",
         "-preset", "ultrafast",
         "-crf", "23",
+        # After baking rotation into pixels, clear the rotation metadata
+        # so decoders don't re-apply it on top.
+        "-metadata:s:v:0", "rotate=0",
         "-c:a", "aac",
         "-b:a", "128k",
         "-movflags", "+faststart",
@@ -86,15 +149,18 @@ def normalize_video_for_pipeline(video_path: str | Path) -> str:
     ]
     try:
         subprocess.run(cmd, check=True, capture_output=True, timeout=180)
-        logger.info("Normalized upload -> %s", out_path)
+        logger.info("Normalized upload -> %s (rotation baked: %d deg)", out_path, rotation)
         return str(out_path)
     except FileNotFoundError:
         logger.warning("ffmpeg not found on PATH — skipping normalization.")
         return str(video_path)
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+        stderr_tail = ""
+        if isinstance(e, subprocess.CalledProcessError) and e.stderr:
+            stderr_tail = e.stderr.decode("utf-8", "ignore")[-400:]
         logger.warning(
-            "Normalization transcode failed (%s) — falling back to original.",
-            type(e).__name__,
+            "Normalization transcode failed (%s) — falling back to original.\n%s",
+            type(e).__name__, stderr_tail,
         )
         return str(video_path)
 

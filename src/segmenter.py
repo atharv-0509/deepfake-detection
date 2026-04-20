@@ -15,7 +15,13 @@ from typing import Iterator, List, Optional
 
 import numpy as np
 
-from .utils import extract_audio_wav, logger, probe_duration, temp_workdir
+from .utils import (
+    extract_audio_wav,
+    logger,
+    probe_duration,
+    probe_rotation_degrees,
+    temp_workdir,
+)
 
 
 @dataclass
@@ -121,21 +127,30 @@ class VideoAudioSegmenter:
             stream = container.streams.video[0]
             time_base = float(stream.time_base) if stream.time_base else 1 / 25
 
-            # Phone/WhatsApp videos store orientation as a metadata tag rather
-            # than baking rotation into the pixels. PyAV does NOT auto-apply
-            # this, so we read it once and rotate each frame post-decode.
-            # Without this, portrait phone videos come out sideways/upside-down
-            # and face-classification models (trained on upright faces) flag
-            # every frame as "fake".
+            # Phone/WhatsApp videos store orientation as metadata rather than
+            # baking rotation into the pixels. PyAV does NOT auto-apply this,
+            # so we read it once and rotate each frame post-decode. Rotation
+            # may live in legacy stream tags (older iPhones/Android) OR in
+            # side-data `display_matrix` (iPhone 14+, newer WhatsApp/Android).
+            # We delegate to ffprobe via probe_rotation_degrees() so both
+            # locations are handled. Without this, portrait phone clips decode
+            # upside down and face classifiers flag every frame as "fake".
             rotate_k = 0
             try:
                 rot_str = stream.metadata.get("rotate")
-                if rot_str is not None:
-                    # Metadata is clockwise degrees; np.rot90 is CCW, so negate.
-                    deg = int(rot_str) % 360
-                    rotate_k = (-deg // 90) % 4
+                deg = int(rot_str) % 360 if rot_str is not None else 0
             except (ValueError, TypeError):
-                rotate_k = 0
+                deg = 0
+            if deg == 0:
+                # Fall back to ffprobe, which also reads side-data.
+                try:
+                    deg = probe_rotation_degrees(self.video_path)
+                except Exception:
+                    deg = 0
+            if deg:
+                # Clockwise degrees; np.rot90 is CCW, so negate.
+                rotate_k = (-deg // 90) % 4
+                logger.info("Detected rotation %d deg -> np.rot90 k=%d", deg, rotate_k)
             # Seek to slightly before t_start to get the keyframe.
             seek_pts = int(max(0.0, t_start - 0.2) / time_base)
             try:

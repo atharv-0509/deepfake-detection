@@ -66,7 +66,20 @@ def parse_args() -> argparse.Namespace:
         "--manifest-dir",
         type=Path,
         default=Path("data/asvspoof"),
-        help="Directory containing asvspoof_{train,dev,eval}.csv.",
+        help="Directory containing {train,dev}.csv (filenames configurable "
+        "via --train-csv / --dev-csv). Defaults assume asvspoof_*.csv.",
+    )
+    ap.add_argument(
+        "--train-csv",
+        type=Path,
+        default=None,
+        help="Explicit path to the training manifest. Overrides --manifest-dir.",
+    )
+    ap.add_argument(
+        "--dev-csv",
+        type=Path,
+        default=None,
+        help="Explicit path to the dev manifest. Overrides --manifest-dir.",
     )
     ap.add_argument(
         "--output-dir",
@@ -246,13 +259,14 @@ def main() -> int:
     # ----------------------------------------------------------------------- #
     # Datasets
     # ----------------------------------------------------------------------- #
-    train_csv = args.manifest_dir / "asvspoof_train.csv"
-    dev_csv = args.manifest_dir / "asvspoof_dev.csv"
+    train_csv = args.train_csv or (args.manifest_dir / "asvspoof_train.csv")
+    dev_csv = args.dev_csv or (args.manifest_dir / "asvspoof_dev.csv")
     if not train_csv.exists() or not dev_csv.exists():
         log.error(
-            "Manifest CSVs not found under %s. "
-            "Run scripts/prepare_asvspoof.py first.",
-            args.manifest_dir,
+            "Manifest CSVs not found: train=%s  dev=%s. "
+            "Run scripts/prepare_asvspoof.py (or scripts/prepare_wavefake.py) first.",
+            train_csv,
+            dev_csv,
         )
         return 2
 

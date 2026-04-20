@@ -165,6 +165,113 @@ def normalize_video_for_pipeline(video_path: str | Path) -> str:
         return str(video_path)
 
 
+_URL_HOST_HINTS = (
+    "youtube.com", "youtu.be", "instagram.com", "tiktok.com",
+    "twitter.com", "x.com", "facebook.com", "fb.watch",
+    "vimeo.com", "reddit.com", "dailymotion.com",
+)
+
+
+def is_url(s: str | Path | None) -> bool:
+    """Return True if `s` looks like a fetchable URL.
+
+    Matches explicit schemes (http(s), ftp(s)) AND scheme-less platform links
+    the user is likely to paste casually (e.g. `youtube.com/watch?v=...`).
+    """
+    if not s:
+        return False
+    s_low = str(s).strip().lower()
+    if s_low.startswith(("http://", "https://", "ftp://", "ftps://")):
+        return True
+    # Scheme-less: accept if it starts with a known video host or its `www.` form.
+    for host in _URL_HOST_HINTS:
+        if s_low.startswith(host) or s_low.startswith("www." + host):
+            return True
+    return False
+
+
+def _ensure_scheme(url: str) -> str:
+    """Prepend https:// to scheme-less URLs so yt-dlp accepts them."""
+    u = url.strip()
+    if u.startswith(("http://", "https://", "ftp://", "ftps://")):
+        return u
+    return "https://" + u
+
+
+def download_media_from_url(
+    url: str,
+    dest_dir: str | Path | None = None,
+    prefer_audio_only: bool = False,
+) -> str:
+    """Download a video (or audio) from a URL to a local file.
+
+    Supports:
+      - Platform URLs: YouTube, Instagram, TikTok, Twitter/X, Facebook,
+        Vimeo, Reddit, and hundreds more (via yt-dlp).
+      - Direct media URLs: any `.mp4`, `.mov`, `.webm`, `.mp3`, `.wav`,
+        `.m4a`, etc. hosted over http(s).
+
+    Returns the absolute path to the downloaded file.
+    """
+    try:
+        import yt_dlp  # type: ignore
+    except ImportError as e:
+        raise RuntimeError(
+            "yt-dlp is required to fetch URLs. Install with `pip install yt-dlp`."
+        ) from e
+
+    dest = Path(dest_dir) if dest_dir else Path(tempfile.mkdtemp(prefix="dfdet_url_"))
+    dest.mkdir(parents=True, exist_ok=True)
+
+    # Prefer merged mp4 (video+audio) unless caller wants audio-only. yt-dlp
+    # falls back to "best single file" if merging isn't possible.
+    fmt = "ba/bestaudio" if prefer_audio_only else "bv*+ba/b/best"
+    ydl_opts = {
+        "outtmpl": str(dest / "%(id)s.%(ext)s"),
+        "format": fmt,
+        "merge_output_format": "mp4",
+        "quiet": True,
+        "no_warnings": True,
+        "noprogress": True,
+        "restrictfilenames": True,
+        # Keep downloads bounded so a single link can't fill the disk.
+        "max_filesize": 500 * 1024 * 1024,   # 500 MB cap
+        "retries": 3,
+        "fragment_retries": 3,
+    }
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(_ensure_scheme(url), download=True)
+        # After merging, the actual file extension may differ from the
+        # prepared filename. Resolve to the real file on disk.
+        candidate = Path(ydl.prepare_filename(info))
+
+    if not candidate.exists():
+        # Search the dest dir for the downloaded payload (post-merge ext swap).
+        matches = sorted(
+            (p for p in dest.iterdir() if p.is_file()),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if not matches:
+            raise RuntimeError(f"yt-dlp reported success but no file in {dest}")
+        candidate = matches[0]
+
+    logger.info("Downloaded %s -> %s (%.1f MB)",
+                url, candidate, candidate.stat().st_size / (1024 * 1024))
+    return str(candidate)
+
+
+def ingest_source(source: str | Path) -> str:
+    """Return a local file path for `source`, downloading it first if it's a URL.
+
+    Lets callers treat URLs and local paths uniformly.
+    """
+    if is_url(source):
+        return download_media_from_url(str(source))
+    return str(source)
+
+
 def probe_duration(path: str | Path) -> float:
     """Return duration (seconds) of a media file via ffprobe."""
     cmd = [

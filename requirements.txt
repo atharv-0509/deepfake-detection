@@ -23,6 +23,7 @@ soundfile>=0.12
 av>=11.0               # PyAV — fast frame decoding
 ffmpeg-python>=0.2
 opencv-python-headless>=4.9
+yt-dlp>=2024.3         # URL ingest (YouTube, Instagram, TikTok, direct mp4/mp3)
 
 # Metrics / eval
 scikit-learn>=1.3

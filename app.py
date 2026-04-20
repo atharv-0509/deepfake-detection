@@ -34,7 +34,13 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from src.pipeline import DeepfakePipeline, PipelineConfig  # noqa: E402
-from src.utils import get_device, normalize_video_for_pipeline, setup_logging  # noqa: E402
+from src.utils import (  # noqa: E402
+    download_media_from_url,
+    get_device,
+    is_url,
+    normalize_video_for_pipeline,
+    setup_logging,
+)
 
 setup_logging("INFO")
 
@@ -205,16 +211,44 @@ def _empty_outputs(message: str):
 # --------------------------------------------------------------------------- #
 # Callbacks
 # --------------------------------------------------------------------------- #
+def fetch_from_url(url: str, progress=gr.Progress(track_tqdm=False)):
+    """Download a URL via yt-dlp and return the local path for the Video input."""
+    url = (url or "").strip()
+    if not url:
+        return None, "_Paste a YouTube / Instagram / TikTok / direct mp4 link above._"
+    if not is_url(url):
+        return None, f"_Doesn't look like a URL: `{url}`_"
+    try:
+        progress(0.05, desc="Downloading via yt-dlp…")
+        local = download_media_from_url(url)
+        progress(1.0, desc="Done.")
+        return local, f"_Fetched: `{Path(local).name}` — click **Analyze** to run detection._"
+    except Exception as e:
+        return None, f"_Download failed: {type(e).__name__}: {e}_"
+
+
 def analyze(
     video_path: Optional[str],
+    url: str,
     threshold: float,
     video_weight: float,
     audio_weight: float,
     frames_per_segment: int,
     progress=gr.Progress(track_tqdm=True),
 ):
+    # Accept either an uploaded file OR a pasted URL. A URL in the textbox
+    # overrides the uploader so the user doesn't have to hit "Fetch" first.
+    url = (url or "").strip()
+    if not video_path and is_url(url):
+        progress(0.0, desc="Downloading from URL…")
+        try:
+            video_path = download_media_from_url(url)
+        except Exception as e:
+            yield _empty_outputs(f"_Download failed: {type(e).__name__}: {e}_")
+            return
+
     if not video_path:
-        yield _empty_outputs("_Upload a video to begin._")
+        yield _empty_outputs("_Upload a video or paste a URL to begin._")
         return
 
     progress(0.01, desc="Normalizing video (rotation + codec)…")
@@ -284,6 +318,16 @@ def build_ui() -> gr.Blocks:
             # Left column: input & settings
             with gr.Column(scale=1, min_width=320):
                 video_in = gr.Video(label="Input video", sources=["upload"], height=280)
+                with gr.Group():
+                    url_in = gr.Textbox(
+                        label="…or paste a URL",
+                        placeholder="https://www.youtube.com/watch?v=…  ·  instagram.com/reel/…  ·  direct .mp4 / .mp3",
+                        lines=1,
+                    )
+                    fetch_btn = gr.Button("⬇️ Fetch from URL", variant="secondary", size="sm")
+                    url_status = gr.Markdown(
+                        "_YouTube / Instagram / TikTok / Twitter / direct mp4 or mp3 all work._"
+                    )
                 run_btn = gr.Button("🔍 Analyze", variant="primary", size="lg")
                 threshold = gr.Slider(
                     0.0, 1.0, value=0.30, step=0.01,
@@ -333,9 +377,22 @@ def build_ui() -> gr.Blocks:
         # Wire events
         video_in.change(echo_video, inputs=video_in, outputs=video_out)
 
+        # Fetch URL -> populate the uploader + preview player, then user clicks Analyze.
+        fetch_btn.click(
+            fetch_from_url,
+            inputs=[url_in],
+            outputs=[video_in, url_status],
+        )
+        # Pressing Enter in the URL box also triggers the fetch.
+        url_in.submit(
+            fetch_from_url,
+            inputs=[url_in],
+            outputs=[video_in, url_status],
+        )
+
         run_btn.click(
             analyze,
-            inputs=[video_in, threshold, video_w, audio_w, fps_seg],
+            inputs=[video_in, url_in, threshold, video_w, audio_w, fps_seg],
             outputs=[summary_md, chart, flagged_df, face_gallery, json_file],
         )
 

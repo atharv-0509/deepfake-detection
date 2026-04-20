@@ -17,12 +17,21 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from src.pipeline import DeepfakePipeline, PipelineConfig  # noqa: E402
-from src.utils import normalize_video_for_pipeline, setup_logging  # noqa: E402
+from src.utils import (  # noqa: E402
+    download_media_from_url,
+    is_url,
+    normalize_video_for_pipeline,
+    setup_logging,
+)
 
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Segment-level deepfake detection.")
-    p.add_argument("--video", required=True, help="Path to input video file.")
+    p.add_argument(
+        "--video", required=True,
+        help="Local video file path OR a URL "
+             "(YouTube / Instagram / TikTok / Twitter / direct mp4 / mp3).",
+    )
     p.add_argument("--config", default="configs/default.yaml", help="YAML config.")
     p.add_argument("--out", default=None, help="Output JSON path.")
     p.add_argument("--device", default=None, help="Override torch device (cpu, cuda, mps).")
@@ -40,9 +49,17 @@ def main() -> int:
     args = parse_args()
     setup_logging(args.log_level)
 
+    # If --video is a URL, fetch it locally first (YouTube / Instagram / TikTok /
+    # Twitter / direct mp4 / mp3 all go through yt-dlp).
+    local_source = args.video
+    if is_url(args.video):
+        print(f"Fetching URL: {args.video}")
+        local_source = download_media_from_url(args.video)
+        print(f"Downloaded -> {local_source}")
+
     # Normalize codec + rotation up front so the pipeline never sees a
     # weird iPhone / WhatsApp / YouTube file. Skip only when the user opts out.
-    video_in = args.video if args.no_normalize else normalize_video_for_pipeline(args.video)
+    video_in = local_source if args.no_normalize else normalize_video_for_pipeline(local_source)
 
     cfg = PipelineConfig.from_yaml(args.config)
     pipe = DeepfakePipeline(cfg, device=args.device)
@@ -52,7 +69,13 @@ def main() -> int:
         face_crops_dir=args.crops_dir,
     )
 
-    out_path = Path(args.out) if args.out else Path(args.video).with_suffix(".timeline.json")
+    # Resolve output path. For URLs, default to out/<id>.timeline.json next to the download.
+    if args.out:
+        out_path = Path(args.out)
+    elif is_url(args.video):
+        out_path = Path(local_source).with_suffix(".timeline.json")
+    else:
+        out_path = Path(args.video).with_suffix(".timeline.json")
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w") as f:
         json.dump(result, f, indent=2)

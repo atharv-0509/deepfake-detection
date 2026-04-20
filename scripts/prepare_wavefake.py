@@ -72,8 +72,14 @@ def find_audio_files(dirpath: Path) -> list[Path]:
 def discover_vocoder_dirs(wavefake_root: Path, include_jsut: bool) -> dict[str, Path]:
     """Find subdirectories that look like WaveFake vocoder splits.
 
-    Handles flat layouts (<root>/ljspeech_hifiGAN/*.wav) and common
-    Kaggle-mirror nesting (<root>/generated_audio/ljspeech_hifiGAN/*.wav).
+    Handles flat layouts (<root>/ljspeech_hifiGAN/*.wav), common
+    Kaggle-mirror nesting (<root>/generated_audio/ljspeech_hifiGAN/*.wav),
+    and non-standard names like
+    `common_voices_prompts_from_conformer_fastspeech2_pwg_ljspeech/` (a
+    newer Conformer+FastSpeech2+PWG attack present in some mirrors).
+
+    Matches any subdirectory whose name contains 'ljspeech' (always) or
+    'jsut' (if include_jsut=True).
     """
     candidates: dict[str, Path] = {}
     for parent in [wavefake_root] + [p for p in wavefake_root.iterdir() if p.is_dir()]:
@@ -83,7 +89,7 @@ def discover_vocoder_dirs(wavefake_root: Path, include_jsut: bool) -> dict[str, 
             if not sub.is_dir():
                 continue
             name = sub.name.lower()
-            if name.startswith("ljspeech_") or (include_jsut and name.startswith("jsut_")):
+            if "ljspeech" in name or (include_jsut and "jsut" in name):
                 candidates.setdefault(sub.name, sub)
     return candidates
 

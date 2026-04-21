@@ -71,3 +71,15 @@ datasets/
 
 # Local model checkpoints (re-download from Kaggle / Hugging Face)
 checkpoints/
+
+# LibreOffice / Office scratch files
+.~lock.*#
+*.tmp
+~$*
+
+# Report deliverables (regenerated from ieee_report.js)
+Deepfake_Detection_IEEE_Report*.docx
+Deepfake_Detection_IEEE_Report*.pdf
+
+# Stray diff dumps
+/f

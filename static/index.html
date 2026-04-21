@@ -1,0 +1,1755 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Verity — Segment-Level Deepfake Detection</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&family=DM+Sans:wght@300;400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+  /* ═══════════════════════════════════════
+     RESET & TOKENS
+  ═══════════════════════════════════════ */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:            #07090D;
+    --bg-2:          #0B0E15;
+    --bg-3:          #0F1320;
+    --surface:       rgba(255,255,255,0.04);
+    --surface-md:    rgba(255,255,255,0.06);
+    --surface-hi:    rgba(255,255,255,0.09);
+    --border:        rgba(255,255,255,0.07);
+    --border-md:     rgba(255,255,255,0.11);
+    --text-hi:       #EDF0F5;
+    --text-mid:      #8B92A0;
+    --text-lo:       #3E4554;
+    --accent:        #7C6CF2;
+    --accent-dim:    rgba(124,108,242,0.15);
+    --accent-glow:   rgba(124,108,242,0.25);
+    --red:           #E05252;
+    --red-dim:       rgba(224,82,82,0.11);
+    --green:         #3EC986;
+    --green-dim:     rgba(62,201,134,0.11);
+    --gold:          #D4A853;
+    --font-d: 'Sora', sans-serif;
+    --font-b: 'DM Sans', sans-serif;
+    --font-m: 'JetBrains Mono', monospace;
+    --nav-h: 62px;
+    --r: 14px;
+    --gap: 110px;
+  }
+
+  html { scroll-behavior: smooth; scrollbar-width: thin; scrollbar-color: var(--border-md) transparent; }
+
+  body {
+    background: var(--bg);
+    color: var(--text-hi);
+    font-family: var(--font-b);
+    overflow-x: hidden;
+    overflow-y: auto;
+    min-height: 100vh;
+  }
+
+  ::selection { background: var(--accent-dim); }
+
+  /* ═══════════════════════════════════════
+     STAR CANVAS
+  ═══════════════════════════════════════ */
+  #stars-canvas {
+    position: fixed; inset: 0;
+    z-index: 0; pointer-events: none;
+  }
+
+  /* ═══════════════════════════════════════
+     NAVBAR — fixed, glass
+  ═══════════════════════════════════════ */
+  #navbar {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    z-index: 1000;
+    height: var(--nav-h);
+    display: flex; align-items: center;
+    justify-content: space-between;
+    padding: 0 44px;
+    background: rgba(7,9,13,0.80);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-bottom: 1px solid var(--border);
+    animation: fadeDown 0.6s ease both;
+  }
+
+  .nav-logo {
+    font-family: var(--font-d);
+    font-size: 15px; font-weight: 600;
+    letter-spacing: -0.02em;
+    color: var(--text-hi);
+    display: flex; align-items: center; gap: 8px;
+    flex-shrink: 0;
+  }
+
+  .logo-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent);
+    animation: pulseGlow 2.5s ease infinite;
+  }
+
+  .nav-links {
+    display: flex; align-items: center; gap: 2px;
+  }
+
+  .nav-link {
+    font-size: 13px; font-weight: 400;
+    color: var(--text-mid);
+    text-decoration: none;
+    cursor: pointer;
+    padding: 6px 14px;
+    border-radius: 100px;
+    transition: color 0.15s, background 0.15s;
+    position: relative;
+  }
+  .nav-link:hover { color: var(--text-hi); background: var(--surface); }
+  .nav-link.active { color: var(--text-hi); background: var(--surface-md); }
+  .nav-link.active::after {
+    content: '';
+    position: absolute;
+    bottom: 4px; left: 50%;
+    transform: translateX(-50%);
+    width: 14px; height: 2px;
+    border-radius: 10px;
+    background: var(--accent);
+  }
+
+  .nav-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+
+  .btn-ghost {
+    font-family: var(--font-b);
+    font-size: 13px; color: var(--text-mid);
+    background: none; border: none;
+    cursor: pointer; padding: 8px 16px;
+    border-radius: 100px;
+    transition: color 0.15s, background 0.15s;
+  }
+  .btn-ghost:hover { color: var(--text-hi); background: var(--surface); }
+
+  .btn-solid {
+    font-family: var(--font-b);
+    font-size: 13px; font-weight: 500;
+    color: #0D1117; background: var(--text-hi);
+    border: none; cursor: pointer;
+    padding: 8px 20px; border-radius: 100px;
+    transition: background 0.15s, transform 0.1s, box-shadow 0.15s;
+    box-shadow: 0 2px 12px rgba(237,240,245,0.12);
+  }
+  .btn-solid:hover { background: #fff; box-shadow: 0 4px 20px rgba(237,240,245,0.22); }
+  .btn-solid:active { transform: scale(0.97); }
+
+  /* ═══════════════════════════════════════
+     MAIN
+  ═══════════════════════════════════════ */
+  main { position: relative; z-index: 1; padding-top: var(--nav-h); }
+
+  .container { max-width: 1080px; margin: 0 auto; padding: 0 40px; }
+
+  /* ═══════════════════════════════════════
+     HERO
+  ═══════════════════════════════════════ */
+  #hero {
+    position: relative;
+    min-height: calc(100vh - var(--nav-h));
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    padding-top: 90px;
+    text-align: center;
+    overflow: hidden;
+  }
+
+  /* BLOB — strictly behind text */
+  #blob-canvas {
+    position: absolute;
+    bottom: -140px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 520px; height: 440px;
+    z-index: 1;           /* behind hero-content (z-index:10) */
+    opacity: 0.50;        /* reduced dominance */
+    filter: blur(1.8px);  /* soft & recessed */
+    pointer-events: none;
+    animation: blobFloat 9s ease-in-out infinite;
+  }
+
+  /* Gradient vignette: above blob (z:3), below text (z:10) */
+  #hero::after {
+    content: '';
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 50%;
+    background: linear-gradient(to bottom, transparent, var(--bg) 88%);
+    z-index: 3;
+    pointer-events: none;
+  }
+
+  /* All hero text: above blob AND gradient */
+  .hero-content {
+    position: relative;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .hero-badge {
+    display: inline-flex; align-items: center; gap: 7px;
+    font-size: 11px; font-weight: 500;
+    letter-spacing: 0.13em; text-transform: uppercase;
+    color: var(--text-lo);
+    border: 1px solid var(--border);
+    padding: 5px 14px; border-radius: 100px;
+    margin-bottom: 28px;
+    animation: fadeUp 0.8s 0.1s ease both;
+  }
+
+  .badge-dot {
+    width: 5px; height: 5px; border-radius: 50%;
+    background: var(--accent);
+    animation: pulseGlow 2.5s ease infinite;
+  }
+
+  .hero-title {
+    font-family: var(--font-d);
+    font-size: clamp(32px, 5vw, 60px);
+    font-weight: 700;
+    line-height: 1.07;
+    letter-spacing: -0.035em;
+    color: var(--text-hi);
+    margin-bottom: 22px;
+    max-width: 720px;
+    animation: fadeUp 0.8s 0.2s ease both;
+  }
+
+  .hero-title .gt {
+    background: linear-gradient(130deg, #EDF0F5 20%, rgba(124,108,242,0.80) 80%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .hero-sub {
+    font-size: 15px; font-weight: 300;
+    color: var(--text-mid);
+    line-height: 1.72; max-width: 420px;
+    margin-bottom: 36px;
+    animation: fadeUp 0.8s 0.3s ease both;
+  }
+
+  .btn-cta {
+    font-family: var(--font-d);
+    font-size: 14px; font-weight: 500;
+    color: #0A0C12; background: var(--text-hi);
+    border: none; cursor: pointer;
+    padding: 14px 34px; border-radius: 100px;
+    transition: background 0.15s, transform 0.12s, box-shadow 0.15s;
+    box-shadow: 0 4px 24px rgba(237,240,245,0.18), 0 1px 0 rgba(255,255,255,0.1) inset;
+    animation: fadeUp 0.8s 0.4s ease both;
+  }
+  .btn-cta:hover { background: #fff; box-shadow: 0 8px 32px rgba(237,240,245,0.28); }
+  .btn-cta:active { transform: scale(0.96); }
+
+  /* Floating stat cards — z-index: 12 (above blob, well below nav) */
+  .stat-card {
+    position: absolute; z-index: 12;
+    background: rgba(11,14,21,0.72);
+    backdrop-filter: blur(22px);
+    -webkit-backdrop-filter: blur(22px);
+    border: 1px solid var(--border-md);
+    border-radius: var(--r);
+    padding: 16px 20px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.44), 0 1px 0 rgba(255,255,255,0.05) inset;
+  }
+
+  .sc-label {
+    font-size: 10px; font-weight: 500;
+    letter-spacing: 0.10em; text-transform: uppercase;
+    color: var(--text-lo); margin-bottom: 8px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+
+  .sc-icon {
+    width: 20px; height: 20px; border-radius: 50%;
+    border: 1px solid var(--border-md);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 9px; color: var(--text-mid);
+  }
+
+  .card-left {
+    bottom: 180px; left: 52px; min-width: 182px;
+    animation: fadeUp 0.9s 0.6s ease both, cardFloatL 7s 1.5s ease-in-out infinite;
+  }
+  .card-left .sc-title {
+    font-family: var(--font-d);
+    font-size: 14px; font-weight: 600;
+    color: var(--text-hi);
+    line-height: 1.3; letter-spacing: -0.02em; margin-bottom: 4px;
+  }
+  .card-left .sc-val {
+    font-family: var(--font-m);
+    font-size: 12px; color: var(--green);
+  }
+
+  .card-right {
+    bottom: 148px; right: 52px; min-width: 158px;
+    animation: fadeUp 0.9s 0.7s ease both, cardFloatR 7s 2s ease-in-out infinite;
+  }
+  .card-right .sc-big {
+    font-family: var(--font-d);
+    font-size: 34px; font-weight: 700;
+    letter-spacing: -0.04em; color: var(--text-hi);
+    line-height: 1; margin-bottom: 10px;
+  }
+  .prog-bar { width: 100%; height: 3px; background: rgba(255,255,255,0.07); border-radius: 10px; overflow: hidden; }
+  .prog-fill {
+    height: 100%; width: 87%;
+    background: linear-gradient(90deg, rgba(124,108,242,0.9), rgba(237,240,245,0.7));
+    border-radius: 10px;
+    transform-origin: left;
+    animation: progressGrow 1.8s 1.2s cubic-bezier(0.25,1,0.5,1) both;
+  }
+
+  /* ═══════════════════════════════════════
+     SHARED SECTION
+  ═══════════════════════════════════════ */
+  .section { padding: var(--gap) 0; position: relative; z-index: 2; }
+
+  .alt-bg { background: var(--bg-2); }
+
+  .sec-divider {
+    width: 100%; height: 1px;
+    background: linear-gradient(90deg, transparent, var(--border) 30%, var(--border) 70%, transparent);
+    margin-bottom: var(--gap);
+  }
+
+  .sec-label {
+    font-size: 11px; font-weight: 500;
+    letter-spacing: 0.13em; text-transform: uppercase;
+    color: var(--text-lo);
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 12px;
+  }
+  .sec-label::before { content: ''; display: block; width: 18px; height: 1px; background: var(--accent); }
+
+  .sec-title {
+    font-family: var(--font-d);
+    font-size: clamp(24px, 3vw, 36px);
+    font-weight: 700; letter-spacing: -0.03em;
+    color: var(--text-hi); line-height: 1.1;
+    margin-bottom: 12px;
+  }
+
+  .sec-sub {
+    font-size: 14px; font-weight: 300;
+    color: var(--text-mid); line-height: 1.68;
+    max-width: 460px; margin-bottom: 44px;
+  }
+
+  /* ═══════════════════════════════════════
+     SECTION 2 — ANALYZE
+  ═══════════════════════════════════════ */
+  .analyze-grid {
+    display: grid;
+    grid-template-columns: 1fr 340px;
+    gap: 22px;
+    align-items: start;
+  }
+
+  .drop-zone {
+    border: 1.5px dashed var(--border-md);
+    border-radius: 18px;
+    padding: 48px 36px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+    background: var(--surface);
+    margin-bottom: 18px;
+  }
+  .drop-zone:hover, .drop-zone.drag-over {
+    border-color: var(--accent);
+    background: var(--accent-dim);
+  }
+
+  .dz-icon {
+    width: 46px; height: 46px; border-radius: 12px;
+    border: 1px solid var(--border-md);
+    background: var(--surface-md);
+    display: flex; align-items: center; justify-content: center;
+    margin: 0 auto 18px; font-size: 19px;
+  }
+  .drop-zone h3 {
+    font-family: var(--font-d);
+    font-size: 14px; font-weight: 600;
+    color: var(--text-hi); margin-bottom: 8px;
+  }
+  .drop-zone p { font-size: 13px; color: var(--text-mid); line-height: 1.6; }
+
+  .fmt-tags { display: flex; justify-content: center; gap: 6px; margin-top: 18px; flex-wrap: wrap; }
+  .fmt-tag {
+    font-family: var(--font-m); font-size: 10px;
+    color: var(--text-lo); border: 1px solid var(--border);
+    border-radius: 5px; padding: 2px 7px;
+  }
+
+  .or-divider {
+    display: flex; align-items: center; gap: 12px;
+    color: var(--text-lo); font-size: 12px; margin: 18px 0;
+  }
+  .or-divider::before, .or-divider::after {
+    content: ''; flex: 1; height: 1px; background: var(--border);
+  }
+
+  .input-row { display: flex; gap: 10px; margin-bottom: 20px; }
+
+  .text-input {
+    flex: 1;
+    font-family: var(--font-b); font-size: 13px;
+    color: var(--text-hi);
+    background: var(--surface);
+    border: 1px solid var(--border-md);
+    border-radius: 10px;
+    padding: 11px 16px; outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .text-input::placeholder { color: var(--text-lo); }
+  .text-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+
+  .btn-analyze {
+    font-family: var(--font-d);
+    font-size: 13px; font-weight: 600;
+    color: #0A0C12; background: var(--text-hi);
+    border: none; cursor: pointer;
+    padding: 11px 22px; border-radius: 10px;
+    white-space: nowrap;
+    display: flex; align-items: center; gap: 7px;
+    transition: background 0.15s, transform 0.1s, box-shadow 0.15s;
+    box-shadow: 0 2px 12px rgba(237,240,245,0.15);
+  }
+  .btn-analyze:hover { background: #fff; }
+  .btn-analyze:active { transform: scale(0.97); }
+  .btn-analyze:disabled { opacity: 0.65; cursor: not-allowed; }
+
+  .analyze-progress { display: none; margin-bottom: 8px; }
+  .analyze-progress.vis { display: block; }
+  .prog-track { width: 100%; height: 2px; background: var(--border); border-radius: 10px; overflow: hidden; margin-bottom: 8px; }
+  .prog-run { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), var(--text-hi)); border-radius: 10px; transition: width 0.4s ease; }
+  .prog-status { font-family: var(--font-m); font-size: 11px; color: var(--text-lo); }
+
+  .config-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 22px;
+    display: flex; flex-direction: column; gap: 22px;
+  }
+
+  .cfg-title {
+    font-family: var(--font-d);
+    font-size: 12px; font-weight: 600;
+    color: var(--text-lo); letter-spacing: 0.06em; text-transform: uppercase;
+  }
+
+  .slider-row { display: flex; flex-direction: column; gap: 9px; }
+  .slider-head { display: flex; justify-content: space-between; align-items: center; }
+  .slider-lbl { font-size: 12px; color: var(--text-mid); }
+  .slider-v {
+    font-family: var(--font-m); font-size: 11px; color: var(--text-hi);
+    background: var(--surface-md); border: 1px solid var(--border);
+    border-radius: 5px; padding: 2px 7px; min-width: 34px; text-align: center;
+  }
+  input[type=range] {
+    -webkit-appearance: none; width: 100%; height: 4px;
+    border-radius: 10px; background: linear-gradient(90deg, var(--accent) 45%, var(--border-md) 45%);
+    outline: none; cursor: pointer;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 14px; height: 14px;
+    border-radius: 50%; background: var(--text-hi);
+    box-shadow: 0 0 0 3px var(--bg), 0 0 0 4px var(--border-md);
+    transition: box-shadow 0.15s;
+  }
+  input[type=range]::-webkit-slider-thumb:hover { box-shadow: 0 0 0 3px var(--bg), 0 0 0 5px var(--accent); }
+
+  .adv-btn {
+    font-family: var(--font-b); font-size: 12px;
+    color: var(--text-lo); background: none; border: none;
+    cursor: pointer; display: flex; align-items: center; gap: 5px;
+    transition: color 0.15s; padding: 0;
+  }
+  .adv-btn:hover { color: var(--text-mid); }
+  .adv-chev { font-size: 9px; transition: transform 0.2s; }
+  .adv-btn.open .adv-chev { transform: rotate(180deg); }
+
+  .adv-body { display: none; flex-direction: column; gap: 13px; margin-top: 13px; }
+  .adv-body.open { display: flex; }
+
+  .toggle-row { display: flex; align-items: center; justify-content: space-between; }
+  .toggle-lbl { font-size: 12px; color: var(--text-mid); }
+  .tgl {
+    width: 30px; height: 17px; border-radius: 100px;
+    background: var(--border-md); position: relative;
+    cursor: pointer; transition: background 0.15s; flex-shrink: 0;
+  }
+  .tgl.on { background: var(--accent); }
+  .tgl::after {
+    content: ''; position: absolute;
+    top: 2.5px; left: 2.5px;
+    width: 12px; height: 12px;
+    border-radius: 50%; background: #fff;
+    transition: transform 0.15s;
+  }
+  .tgl.on::after { transform: translateX(13px); }
+
+  .sel-input {
+    font-family: var(--font-m); font-size: 11px;
+    color: var(--text-hi); background: var(--surface-md);
+    border: 1px solid var(--border); border-radius: 7px;
+    padding: 6px 10px; outline: none; cursor: pointer; width: 100%;
+  }
+
+  /* ═══════════════════════════════════════
+     SECTION 3 — RESULTS
+  ═══════════════════════════════════════ */
+  .empty-state {
+    text-align: center; padding: 56px 20px;
+    color: var(--text-lo); font-size: 14px; line-height: 1.65;
+    border: 1.5px dashed var(--border); border-radius: 18px;
+    background: var(--surface);
+  }
+  .empty-icon { font-size: 30px; margin-bottom: 14px; opacity: 0.35; }
+
+  .verdict-banner {
+    display: none;
+    border-radius: var(--r); padding: 20px 26px;
+    margin-bottom: 28px; border: 1px solid;
+    align-items: center; gap: 18px;
+  }
+  .verdict-banner.vis { display: flex; }
+  .verdict-banner.tampered { background: var(--red-dim); border-color: rgba(224,82,82,0.20); }
+  .verdict-banner.authentic { background: var(--green-dim); border-color: rgba(62,201,134,0.20); }
+
+  .v-pill {
+    font-family: var(--font-d); font-size: 10px;
+    font-weight: 700; letter-spacing: 0.13em; text-transform: uppercase;
+    padding: 5px 12px; border-radius: 100px; flex-shrink: 0;
+  }
+  .tampered .v-pill { background: var(--red); color: #fff; }
+  .authentic .v-pill { background: var(--green); color: #07090D; }
+
+  .v-text h4 { font-family: var(--font-d); font-size: 15px; font-weight: 600; color: var(--text-hi); margin-bottom: 3px; }
+  .v-text p { font-size: 13px; color: var(--text-mid); }
+
+  .v-conf { margin-left: auto; text-align: right; flex-shrink: 0; }
+  .v-pct {
+    font-family: var(--font-d); font-size: 30px;
+    font-weight: 700; letter-spacing: -0.03em; line-height: 1;
+  }
+  .tampered .v-pct { color: var(--red); }
+  .authentic .v-pct { color: var(--green); }
+  .v-sublabel { font-size: 11px; color: var(--text-lo); margin-top: 2px; }
+
+  .metrics-grid {
+    display: none;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px; margin-bottom: 28px;
+  }
+  .metrics-grid.vis { display: grid; }
+
+  .m-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 13px; padding: 18px 18px;
+  }
+  .m-label {
+    font-size: 10px; font-weight: 500;
+    letter-spacing: 0.09em; text-transform: uppercase;
+    color: var(--text-lo); margin-bottom: 10px;
+  }
+  .m-val {
+    font-family: var(--font-d); font-size: 26px;
+    font-weight: 700; letter-spacing: -0.03em;
+    color: var(--text-hi); line-height: 1; margin-bottom: 4px;
+  }
+  .m-sub { font-size: 11px; color: var(--text-lo); }
+
+  .timeline-wrap {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--r); padding: 22px;
+    margin-bottom: 24px; display: none;
+  }
+  .timeline-wrap.vis { display: block; }
+
+  .tl-head {
+    display: flex; justify-content: space-between;
+    align-items: center; margin-bottom: 18px;
+  }
+  .tl-head h3 { font-family: var(--font-d); font-size: 14px; font-weight: 600; color: var(--text-hi); }
+  .tl-legend { display: flex; gap: 14px; font-size: 11px; color: var(--text-lo); align-items: center; }
+  .leg-dot { width: 8px; height: 8px; border-radius: 2px; display: inline-block; margin-right: 3px; }
+
+  #tl-canvas { width: 100%; height: 74px; border-radius: 7px; cursor: crosshair; display: block; }
+  .tl-ticks { display: flex; justify-content: space-between; margin-top: 8px; font-family: var(--font-m); font-size: 10px; color: var(--text-lo); }
+
+  .table-wrap {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--r); overflow: hidden; display: none;
+  }
+  .table-wrap.vis { display: block; }
+
+  .t-head {
+    display: grid;
+    grid-template-columns: 72px 72px 1fr 88px 96px;
+    padding: 11px 20px; border-bottom: 1px solid var(--border);
+    font-size: 10px; font-weight: 500;
+    letter-spacing: 0.10em; text-transform: uppercase;
+    color: var(--text-lo); gap: 14px;
+  }
+  .t-row {
+    display: grid;
+    grid-template-columns: 72px 72px 1fr 88px 96px;
+    padding: 13px 20px; border-bottom: 1px solid var(--border);
+    font-size: 12.5px; color: var(--text-mid);
+    gap: 14px; align-items: center;
+    transition: background 0.15s;
+  }
+  .t-row:last-child { border-bottom: none; }
+  .t-row:hover { background: var(--surface-hi); }
+  .t-time { font-family: var(--font-m); font-size: 11px; color: var(--text-hi); }
+
+  .sev-chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 10px; font-weight: 500;
+    padding: 3px 9px; border-radius: 100px;
+  }
+  .sev-chip.high   { background: var(--red-dim); color: var(--red); }
+  .sev-chip.medium { background: rgba(212,168,83,0.10); color: var(--gold); }
+  .sev-chip.low    { background: var(--green-dim); color: var(--green); }
+
+  .prob-cell { display: flex; align-items: center; gap: 7px; }
+  .prob-mini { flex: 1; height: 3px; background: var(--border); border-radius: 10px; overflow: hidden; }
+  .prob-mini-fill { height: 100%; border-radius: 10px; background: var(--red); opacity: 0.75; }
+
+  /* ═══════════════════════════════════════
+     SECTION 4 — EVIDENCE
+  ═══════════════════════════════════════ */
+  .evidence-grid {
+    display: none;
+    grid-template-columns: 1fr 290px;
+    gap: 22px;
+  }
+  .evidence-grid.vis { display: grid; }
+
+  .video-ph {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--r); aspect-ratio: 16/9;
+    display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 12px;
+    color: var(--text-lo); font-size: 13px;
+    position: relative; overflow: hidden;
+  }
+
+  /* Scan line animation on video player */
+  .video-ph::after {
+    content: '';
+    position: absolute; top: 0; left: 0;
+    width: 28%; height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(124,108,242,0.14), transparent);
+    animation: scanLine 2s ease-in-out infinite;
+    pointer-events: none;
+  }
+
+  .play-btn {
+    width: 50px; height: 50px; border-radius: 50%;
+    background: var(--surface-md); border: 1px solid var(--border-md);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 17px; cursor: pointer;
+    transition: background 0.15s, transform 0.12s;
+  }
+  .play-btn:hover { background: var(--surface-hi); transform: scale(1.06); }
+
+  .ev-panel { display: flex; flex-direction: column; gap: 14px; }
+  .ev-panel-title { font-family: var(--font-d); font-size: 13px; font-weight: 600; color: var(--text-mid); margin-bottom: 4px; }
+  .ev-panel-sub { font-size: 12px; color: var(--text-lo); margin-bottom: 10px; }
+
+  .face-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
+  .face-thumb {
+    aspect-ratio: 1; border-radius: 9px;
+    border: 1.5px solid var(--border); overflow: hidden;
+    position: relative; cursor: pointer; transition: border-color 0.15s;
+  }
+  .face-thumb:hover { border-color: var(--text-lo); }
+  .face-thumb.flagged { border-color: var(--red); }
+
+  .face-inner {
+    width: 100%; height: 100%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px;
+  }
+  .face-lbl {
+    position: absolute; bottom: 3px; left: 3px; right: 3px;
+    font-family: var(--font-m); font-size: 9px; text-align: center;
+    color: var(--text-hi);
+    background: rgba(0,0,0,0.65); border-radius: 3px; padding: 2px;
+  }
+  .face-thumb.flagged .face-lbl { color: var(--red); }
+
+  .btn-dl {
+    font-family: var(--font-b); font-size: 13px; font-weight: 500;
+    color: var(--text-hi); background: var(--surface-md);
+    border: 1px solid var(--border-md); cursor: pointer;
+    padding: 12px 18px; border-radius: 10px;
+    display: flex; align-items: center; gap: 8px;
+    justify-content: center;
+    transition: background 0.15s, border-color 0.15s; width: 100%;
+  }
+  .btn-dl:hover { background: var(--surface-hi); border-color: var(--text-lo); }
+
+  .ev-empty {
+    text-align: center; padding: 56px 20px;
+    color: var(--text-lo); font-size: 14px;
+    border: 1.5px dashed var(--border); border-radius: 18px;
+    background: var(--surface);
+  }
+
+  /* ═══════════════════════════════════════
+     SECTION 5 — FAQ
+  ═══════════════════════════════════════ */
+  .faq-list { display: flex; flex-direction: column; gap: 9px; max-width: 740px; }
+
+  .faq-item {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 13px; overflow: hidden; transition: border-color 0.15s;
+  }
+  .faq-item:hover { border-color: var(--border-md); }
+  .faq-item.open { border-color: rgba(124,108,242,0.22); }
+
+  .faq-q {
+    display: flex; justify-content: space-between;
+    align-items: center; padding: 17px 20px;
+    cursor: pointer; user-select: none; gap: 14px;
+  }
+  .faq-q h4 { font-family: var(--font-d); font-size: 14px; font-weight: 500; color: var(--text-hi); line-height: 1.4; }
+
+  .faq-chev {
+    flex-shrink: 0; width: 22px; height: 22px; border-radius: 50%;
+    border: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; color: var(--text-mid);
+    transition: transform 0.2s, background 0.15s;
+  }
+  .faq-item.open .faq-chev { transform: rotate(180deg); background: var(--accent-dim); }
+
+  .faq-a { max-height: 0; overflow: hidden; transition: max-height 0.3s ease; }
+  .faq-item.open .faq-a { max-height: 200px; }
+  .faq-a p { padding: 0 20px 17px; padding-top: 14px; font-size: 13px; color: var(--text-mid); line-height: 1.7; border-top: 1px solid var(--border); }
+
+  /* ═══════════════════════════════════════
+     FOOTER
+  ═══════════════════════════════════════ */
+  #contact { background: var(--bg); border-top: 1px solid var(--border); padding: 52px 0 36px; }
+
+  .footer-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 30px; margin-bottom: 38px; }
+
+  .ft-col-title {
+    font-size: 10px; font-weight: 500;
+    letter-spacing: 0.11em; text-transform: uppercase;
+    color: var(--text-lo); margin-bottom: 14px;
+  }
+
+  .sys-rows { display: flex; flex-direction: column; gap: 7px; }
+  .sys-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 5px 9px; background: var(--surface);
+    border-radius: 7px; border: 1px solid var(--border);
+  }
+  .sys-k { font-family: var(--font-m); font-size: 10px; color: var(--text-lo); }
+  .sys-v { font-family: var(--font-m); font-size: 10px; color: var(--text-mid); }
+
+  .ft-links { display: flex; flex-direction: column; gap: 8px; }
+  .ft-link { font-size: 13px; color: var(--text-mid); text-decoration: none; transition: color 0.15s; }
+  .ft-link:hover { color: var(--text-hi); }
+
+  .footer-btm {
+    display: flex; justify-content: space-between; align-items: center;
+    padding-top: 24px; border-top: 1px solid var(--border);
+    font-size: 12px; color: var(--text-lo);
+    flex-wrap: wrap; gap: 12px;
+  }
+
+  .ft-logo {
+    font-family: var(--font-d); font-size: 14px;
+    font-weight: 600; color: var(--text-mid);
+    display: flex; align-items: center; gap: 7px;
+  }
+
+  .status-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: var(--font-m); font-size: 10px; color: var(--green);
+    border: 1px solid rgba(62,201,134,0.2); border-radius: 100px; padding: 3px 10px;
+  }
+  .status-chip::before {
+    content: ''; width: 5px; height: 5px;
+    border-radius: 50%; background: var(--green);
+    animation: pulseGlow 2s ease infinite;
+  }
+
+  /* ═══════════════════════════════════════
+     KEYFRAMES
+  ═══════════════════════════════════════ */
+  @keyframes fadeDown { from{opacity:0;transform:translateY(-10px)} to{opacity:1;transform:translateY(0)} }
+  @keyframes fadeUp   { from{opacity:0;transform:translateY(16px)}  to{opacity:1;transform:translateY(0)} }
+  @keyframes blobFloat {
+    0%,100% { transform:translateX(-50%) translateY(0px); }
+    40%     { transform:translateX(-50%) translateY(-14px); }
+    70%     { transform:translateX(-50%) translateY(-7px); }
+  }
+  @keyframes cardFloatL { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-9px)} }
+  @keyframes cardFloatR { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-11px)} }
+  @keyframes progressGrow { from{transform:scaleX(0)} to{transform:scaleX(1)} }
+  @keyframes pulseGlow { 0%,100%{opacity:1} 50%{opacity:0.35} }
+  @keyframes scanLine  { from{transform:translateX(-100%)} to{transform:translateX(500%)} }
+
+  /* ═══════════════════════════════════════
+     RESPONSIVE
+  ═══════════════════════════════════════ */
+  @media (max-width:900px) {
+    .analyze-grid { grid-template-columns:1fr; }
+    .metrics-grid { grid-template-columns:repeat(2,1fr); }
+    .evidence-grid { grid-template-columns:1fr; }
+    .footer-grid { grid-template-columns:1fr 1fr; }
+    .t-head,.t-row { grid-template-columns:70px 70px 1fr 80px; }
+    .t-head span:last-child,.t-row span:last-child { display:none; }
+  }
+  @media (max-width:640px) {
+    :root { --gap:70px; }
+    .container { padding:0 20px; }
+    #navbar { padding:0 20px; }
+    .nav-links { display:none; }
+    #blob-canvas { width:320px; height:280px; bottom:-100px; }
+    .card-left  { left:12px; bottom:200px; }
+    .card-right { right:12px; bottom:165px; }
+    .footer-grid { grid-template-columns:1fr; }
+    .hero-title { font-size:28px; }
+    .metrics-grid { grid-template-columns:repeat(2,1fr); }
+  }
+  </style>
+</head>
+<body>
+
+<canvas id="stars-canvas"></canvas>
+
+<!-- ══════════════════════════
+     NAVBAR
+══════════════════════════ -->
+<nav id="navbar">
+  <div class="nav-logo">
+    <span class="logo-dot"></span>
+    Verity
+  </div>
+
+  <div class="nav-links">
+    <a class="nav-link active" data-target="hero"     href="#hero">About</a>
+    <a class="nav-link"        data-target="analyze"  href="#analyze">Analyze</a>
+    <a class="nav-link"        data-target="results"  href="#results">Results</a>
+    <a class="nav-link"        data-target="faq"      href="#faq">FAQ</a>
+    <a class="nav-link"        data-target="contact"  href="#contact">Contact</a>
+  </div>
+
+  <div class="nav-right">
+    <button class="btn-ghost">Docs</button>
+    <button class="btn-solid" onclick="scrollTo('analyze')">Try Demo</button>
+  </div>
+</nav>
+
+<main>
+
+  <!-- ══════════════════════════
+       HERO
+  ══════════════════════════ -->
+  <section id="hero">
+
+    <!-- BLOB: z-index:1 — behind everything textual -->
+    <canvas id="blob-canvas"></canvas>
+
+    <!-- TEXT: z-index:10 — always on top of blob -->
+    <div class="hero-content">
+      <div class="hero-badge">
+        <span class="badge-dot"></span>
+        Neural Forensic Analysis
+      </div>
+
+      <h1 class="hero-title">
+        <span class="gt">Segment-Level</span><br />
+        <span class="gt">Deepfake Detection</span>
+      </h1>
+
+      <p class="hero-sub">
+        Analyze video and audio streams to detect tampering at a per-second level — powered by multimodal neural forensics.
+      </p>
+
+      <button class="btn-cta" onclick="scrollTo('analyze')">Analyze Media</button>
+    </div>
+
+    <!-- Floating cards: z-index:12 -->
+    <div class="stat-card card-left">
+      <div class="sc-label">Audio Integrity <span class="sc-icon">↗</span></div>
+      <div class="sc-title">Face Consistency<br>Score</div>
+      <div class="sc-val">92.4%</div>
+    </div>
+
+    <div class="stat-card card-right">
+      <div class="sc-label">Detection Acc. <span class="sc-icon">↗</span></div>
+      <div class="sc-big">87%</div>
+      <div class="prog-bar"><div class="prog-fill"></div></div>
+    </div>
+
+  </section>
+
+  <!-- ══════════════════════════
+       SECTION 2: ANALYZE
+  ══════════════════════════ -->
+  <section id="analyze" class="section alt-bg">
+    <div class="container">
+      <div class="sec-divider"></div>
+      <p class="sec-label">Input & Controls</p>
+      <h2 class="sec-title">Upload &amp; Configure</h2>
+      <p class="sec-sub">Drop a video file or paste a public URL. Tune the threshold and model settings before running analysis.</p>
+
+      <div class="analyze-grid">
+        <div>
+          <div class="drop-zone" id="drop-zone">
+            <div class="dz-icon">⬆</div>
+            <h3 id="dz-title">Drop a video or audio file here</h3>
+            <p id="dz-sub">Drag &amp; drop .mp4, .mov, .webm, .mp3 or .wav<br />to begin forensic analysis</p>
+            <div class="fmt-tags">
+              <span class="fmt-tag">.mp4</span>
+              <span class="fmt-tag">.mov</span>
+              <span class="fmt-tag">.webm</span>
+              <span class="fmt-tag">.mp3</span>
+              <span class="fmt-tag">.wav</span>
+            </div>
+          </div>
+
+          <div class="or-divider">or paste a URL</div>
+
+          <div class="input-row">
+            <input id="url-input" class="text-input" type="text"
+              placeholder="YouTube · TikTok · Instagram · direct .mp4 URL" />
+            <button class="btn-analyze" id="btn-analyze" onclick="runAnalysis()">
+              <span id="btn-icon">◈</span>
+              <span id="btn-text">Analyze</span>
+            </button>
+          </div>
+
+          <div class="analyze-progress" id="a-prog">
+            <div class="prog-track"><div class="prog-run" id="prog-run"></div></div>
+            <div class="prog-status" id="prog-status">Initializing…</div>
+          </div>
+        </div>
+
+        <div class="config-panel">
+          <p class="cfg-title">Detection Parameters</p>
+
+          <div class="slider-row">
+            <div class="slider-head">
+              <span class="slider-lbl">Detection Threshold</span>
+              <span class="slider-v" id="v-thresh">0.45</span>
+            </div>
+            <input type="range" id="sl-thresh" min="0" max="100" value="45"
+              oninput="document.getElementById('v-thresh').textContent=(this.value/100).toFixed(2); syncSlider(this)" />
+          </div>
+
+          <div class="slider-row">
+            <div class="slider-head">
+              <span class="slider-lbl">Segment Window</span>
+              <span class="slider-v" id="v-win">1.0s</span>
+            </div>
+            <input type="range" id="sl-win" min="5" max="50" value="10"
+              oninput="document.getElementById('v-win').textContent=(this.value/10).toFixed(1)+'s'; syncSlider(this)" />
+          </div>
+
+          <div>
+            <button class="adv-btn" id="adv-btn" onclick="toggleAdv()">
+              Advanced options <span class="adv-chev">▾</span>
+            </button>
+            <div class="adv-body" id="adv-body">
+              <div class="toggle-row">
+                <span class="toggle-lbl">Audio spectral analysis</span>
+                <div class="tgl on" onclick="this.classList.toggle('on')"></div>
+              </div>
+              <div class="toggle-row">
+                <span class="toggle-lbl">Face crop tracking</span>
+                <div class="tgl on" onclick="this.classList.toggle('on')"></div>
+              </div>
+              <div class="toggle-row">
+                <span class="toggle-lbl">GAN artifact scanner</span>
+                <div class="tgl" onclick="this.classList.toggle('on')"></div>
+              </div>
+              <div class="slider-row">
+                <span class="slider-lbl" style="margin-bottom:7px;display:block">Model backbone</span>
+                <select class="sel-input" id="backbone-sel">
+                  <option>ViT-forgery (default)</option>
+                  <option>Xception-FF++</option>
+                  <option>EfficientNet-B4</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════
+       SECTION 3: RESULTS
+  ══════════════════════════ -->
+  <section id="results" class="section">
+    <div class="container">
+      <div class="sec-divider"></div>
+      <p class="sec-label">Verdict &amp; Timeline</p>
+      <h2 class="sec-title">Analysis Report</h2>
+      <p class="sec-sub">Segment-by-segment breakdown with flagged timestamps, probability scores, and tamper type classification.</p>
+
+      <!-- Empty state -->
+      <div class="empty-state" id="res-empty">
+        <div class="empty-icon">⬡</div>
+        <strong style="color:var(--text-mid);font-family:var(--font-d)">No analysis run yet</strong><br />
+        Drop a video or paste a URL above, then click Analyze to generate a report.
+      </div>
+
+      <!-- Verdict -->
+      <div class="verdict-banner tampered" id="verdict">
+        <div class="v-pill">Tampered</div>
+        <div class="v-text">
+          <h4>Manipulation Detected</h4>
+          <p>3 of 12 segments flagged — audio–visual desync and GAN artifacts found</p>
+        </div>
+        <div class="v-conf">
+          <div class="v-pct">78%</div>
+          <div class="v-sublabel">fake probability</div>
+        </div>
+      </div>
+
+      <!-- Metrics -->
+      <div class="metrics-grid" id="metrics">
+        <div class="m-card">
+          <div class="m-label">Fake Probability</div>
+          <div class="m-val" style="color:var(--red)">0.78</div>
+          <div class="m-sub">above threshold (0.45)</div>
+        </div>
+        <div class="m-card">
+          <div class="m-label">Flagged Segments</div>
+          <div class="m-val">3 / 12</div>
+          <div class="m-sub">25% of total duration</div>
+        </div>
+        <div class="m-card">
+          <div class="m-label">Audio Integrity</div>
+          <div class="m-val" style="color:var(--gold)">61%</div>
+          <div class="m-sub">spectral inconsistency</div>
+        </div>
+        <div class="m-card">
+          <div class="m-label">Face Confidence</div>
+          <div class="m-val" style="color:var(--green)">92%</div>
+          <div class="m-sub">landmark stability</div>
+        </div>
+      </div>
+
+      <!-- Timeline -->
+      <div class="timeline-wrap" id="tl-wrap">
+        <div class="tl-head">
+          <h3>Detection Timeline</h3>
+          <div class="tl-legend">
+            <span><span class="leg-dot" style="background:rgba(62,201,134,0.65)"></span>Clean</span>
+            <span><span class="leg-dot" style="background:rgba(224,82,82,0.75)"></span>Flagged</span>
+            <span><span class="leg-dot" style="background:rgba(212,168,83,0.65)"></span>Uncertain</span>
+          </div>
+        </div>
+        <canvas id="tl-canvas"></canvas>
+        <div class="tl-ticks" id="tl-ticks"></div>
+      </div>
+
+      <!-- Table -->
+      <div class="table-wrap" id="tbl-wrap">
+        <div class="t-head">
+          <span>Start</span><span>End</span>
+          <span>Detection Type</span>
+          <span>Severity</span>
+          <span>Fake Prob.</span>
+        </div>
+        <div id="tbl-body"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════
+       SECTION 4: EVIDENCE
+  ══════════════════════════ -->
+  <section id="evidence" class="section alt-bg">
+    <div class="container">
+      <div class="sec-divider"></div>
+      <p class="sec-label">Evidence Viewer</p>
+      <h2 class="sec-title">Frame &amp; Audio Evidence</h2>
+      <p class="sec-sub">Inspect flagged face crops, review the playback timeline, and export the full forensic JSON report.</p>
+
+      <div class="ev-empty" id="ev-empty">
+        <div class="empty-icon">⬡</div>
+        <strong style="color:var(--text-mid);font-family:var(--font-d)">No evidence to display</strong><br />
+        Run an analysis first to inspect flagged frames.
+      </div>
+
+      <div class="evidence-grid" id="ev-grid">
+        <div class="video-ph" id="vid-ph">
+          <div class="play-btn">▶</div>
+          <span>sample_interview.mp4 · 01:24</span>
+        </div>
+        <div class="ev-panel">
+          <div>
+            <div class="ev-panel-title">Face Crop Samples</div>
+            <div class="ev-panel-sub">6 faces tracked across flagged segments</div>
+            <div class="face-grid" id="face-grid"></div>
+          </div>
+          <button class="btn-dl" onclick="downloadJSON()">
+            <span>↓</span> Download JSON Report
+          </button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════
+       SECTION 5: FAQ
+  ══════════════════════════ -->
+  <section id="faq" class="section">
+    <div class="container">
+      <div class="sec-divider"></div>
+      <p class="sec-label">FAQ</p>
+      <h2 class="sec-title">Common Questions</h2>
+      <p class="sec-sub">Everything you need to know about how Verity detects manipulated media at the segment level.</p>
+      <div class="faq-list" id="faq-list"></div>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════
+       FOOTER
+  ══════════════════════════ -->
+  <footer id="contact">
+    <div class="container">
+      <div class="footer-grid">
+        <div>
+          <div class="ft-col-title">System Info</div>
+          <div class="sys-rows">
+            <div class="sys-row"><span class="sys-k">MODEL</span><span class="sys-v" id="sys-model">ViT-forgery + wav2vec2-LoRA</span></div>
+            <div class="sys-row"><span class="sys-k">BACKEND</span><span class="sys-v" id="sys-backend">PyTorch · loading…</span></div>
+            <div class="sys-row"><span class="sys-k">DEVICE</span><span class="sys-v" id="sys-device">—</span></div>
+            <div class="sys-row"><span class="sys-k">DATASETS</span><span class="sys-v">FaceForensics++ · ASVspoof 2019 LA</span></div>
+            <div class="sys-row"><span class="sys-k">FUSION</span><span class="sys-v">Late weighted · v=0.80 · a=0.20</span></div>
+          </div>
+        </div>
+        <div>
+          <div class="ft-col-title">Resources</div>
+          <div class="ft-links">
+            <a href="#" class="ft-link">API Reference</a>
+            <a href="#" class="ft-link">Model Card</a>
+            <a href="#" class="ft-link">Research Paper</a>
+            <a href="#" class="ft-link">GitHub Repository</a>
+            <a href="#" class="ft-link">Changelog</a>
+          </div>
+        </div>
+        <div>
+          <div class="ft-col-title">Contact</div>
+          <div class="ft-links">
+            <a href="#" class="ft-link">research@verity.ai</a>
+            <a href="#" class="ft-link">Report False Positive</a>
+            <a href="#" class="ft-link">Enterprise Inquiry</a>
+            <a href="#" class="ft-link">Privacy Policy</a>
+          </div>
+        </div>
+      </div>
+      <div class="footer-btm">
+        <div class="ft-logo"><span class="logo-dot"></span>Verity</div>
+        <div class="status-chip">All systems operational</div>
+        <span>© 2026 Verity Research. All rights reserved.</span>
+      </div>
+    </div>
+  </footer>
+
+</main>
+
+<script>
+/* ════════════════════════════════════════
+   UTILITY
+════════════════════════════════════════ */
+function scrollTo(id) { document.getElementById(id).scrollIntoView({ behavior:'smooth' }); }
+
+/* ════════════════════════════════════════
+   1. STAR FIELD
+════════════════════════════════════════ */
+(function(){
+  const c=document.getElementById('stars-canvas');
+  const ctx=c.getContext('2d');
+  let stars=[];
+  function resize(){ c.width=window.innerWidth; c.height=window.innerHeight; }
+  function mkStar(){ return{ x:Math.random()*c.width, y:Math.random()*c.height, r:Math.random()*1.0+0.2, a:Math.random()*0.45+0.08, sp:Math.random()*0.003+0.001, ph:Math.random()*Math.PI*2 }; }
+  function draw(t){
+    ctx.clearRect(0,0,c.width,c.height);
+    for(const s of stars){
+      const a=s.a*(0.5+0.5*Math.sin(t*s.sp+s.ph));
+      ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,Math.PI*2);
+      ctx.fillStyle=`rgba(210,218,235,${a})`; ctx.fill();
+    }
+  }
+  function loop(t){ draw(t); requestAnimationFrame(loop); }
+  resize(); stars=Array.from({length:180},mkStar);
+  requestAnimationFrame(loop);
+  window.addEventListener('resize',()=>{ resize(); stars=Array.from({length:180},mkStar); });
+})();
+
+/* ════════════════════════════════════════
+   2. METALLIC BLOB (z-index:1, opacity:0.50, blur:1.8px)
+════════════════════════════════════════ */
+(function(){
+  const canvas=document.getElementById('blob-canvas');
+  const ctx=canvas.getContext('2d');
+  canvas.width=520; canvas.height=440;
+  const W=520, H=440;
+  let t=0;
+
+  function blobPath(cx,cy,R,t){
+    ctx.beginPath();
+    for(let i=0;i<=128;i++){
+      const a=(i/128)*Math.PI*2;
+      const n= Math.sin(a*3+t*0.55)*16 + Math.sin(a*5-t*0.38)*9 + Math.sin(a*7+t*0.85)*5 + Math.sin(a*2-t*0.22)*20;
+      const r=R+n;
+      const x=cx+Math.cos(a)*r, y=cy+Math.sin(a)*r*0.70;
+      i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+    }
+    ctx.closePath();
+  }
+
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+    ctx.save();
+    const cx=W/2, cy=H*0.64, R=165;
+
+    const glow=ctx.createRadialGradient(cx,cy,30,cx,cy,R+55);
+    glow.addColorStop(0,'rgba(80,55,180,0.22)');
+    glow.addColorStop(0.5,'rgba(50,35,110,0.09)');
+    glow.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=glow; ctx.beginPath();
+    ctx.ellipse(cx,cy,R+70,R*0.82,0,0,Math.PI*2); ctx.fill();
+
+    blobPath(cx,cy,R,t); ctx.save(); ctx.clip();
+
+    const base=ctx.createLinearGradient(cx-R,cy-R,cx+R*0.8,cy+R);
+    base.addColorStop(0,'#18120e'); base.addColorStop(0.25,'#271c0d');
+    base.addColorStop(0.55,'#0e0c18'); base.addColorStop(0.8,'#090a13'); base.addColorStop(1,'#040508');
+    ctx.fillStyle=base; ctx.fillRect(cx-R-80,cy-R-80,(R+80)*2,(R+80)*2);
+
+    const gold=ctx.createRadialGradient(cx-R*0.04,cy-R*0.09,0,cx-R*0.04,cy-R*0.09,R*1.05);
+    gold.addColorStop(0,'rgba(210,165,75,0.80)'); gold.addColorStop(0.18,'rgba(180,130,55,0.50)');
+    gold.addColorStop(0.38,'rgba(130,85,28,0.20)'); gold.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=gold; ctx.fillRect(cx-R-80,cy-R-80,(R+80)*2,(R+80)*2);
+
+    const blue=ctx.createRadialGradient(cx+R*0.44,cy+R*0.28,0,cx+R*0.44,cy+R*0.28,R*0.88);
+    blue.addColorStop(0,'rgba(75,95,215,0.65)'); blue.addColorStop(0.22,'rgba(55,75,170,0.35)'); blue.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=blue; ctx.fillRect(cx-R-80,cy-R-80,(R+80)*2,(R+80)*2);
+
+    const spec=ctx.createRadialGradient(cx+R*0.11,cy-R*0.30,0,cx+R*0.11,cy-R*0.30,R*0.42);
+    spec.addColorStop(0,'rgba(255,255,255,0.48)'); spec.addColorStop(0.14,'rgba(255,255,255,0.16)'); spec.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=spec; ctx.fillRect(cx-R-80,cy-R-80,(R+80)*2,(R+80)*2);
+
+    const teal=ctx.createRadialGradient(cx-R*0.58,cy+R*0.09,0,cx-R*0.58,cy+R*0.09,R*0.50);
+    teal.addColorStop(0,'rgba(18,175,155,0.26)'); teal.addColorStop(0.30,'rgba(0,130,115,0.09)'); teal.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=teal; ctx.fillRect(cx-R-80,cy-R-80,(R+80)*2,(R+80)*2);
+
+    ctx.restore();
+    blobPath(cx,cy,R,t);
+    ctx.strokeStyle='rgba(190,150,75,0.09)'; ctx.lineWidth=1.5; ctx.stroke();
+    ctx.restore();
+  }
+
+  function loop(ts){ t=ts/1000; draw(); requestAnimationFrame(loop); }
+  requestAnimationFrame(loop);
+})();
+
+/* ════════════════════════════════════════
+   3. NAVBAR SCROLL SPY
+════════════════════════════════════════ */
+(function(){
+  const links=document.querySelectorAll('.nav-link[data-target]');
+  const ids=['hero','analyze','results','evidence','faq','contact'];
+
+  const obs=new IntersectionObserver(entries=>{
+    entries.forEach(e=>{
+      if(e.isIntersecting){
+        links.forEach(l=>l.classList.toggle('active', l.dataset.target===e.target.id));
+      }
+    });
+  },{ threshold:0.25, rootMargin:'-60px 0px -35% 0px' });
+
+  ids.forEach(id=>{ const el=document.getElementById(id); if(el) obs.observe(el); });
+
+  links.forEach(l=>{
+    l.addEventListener('click',e=>{
+      e.preventDefault();
+      const t=document.getElementById(l.dataset.target);
+      if(t) t.scrollIntoView({behavior:'smooth'});
+    });
+  });
+})();
+
+/* ════════════════════════════════════════
+   4. SLIDER SYNC
+════════════════════════════════════════ */
+function syncSlider(s){
+  const p=((s.value-s.min)/(s.max-s.min))*100;
+  s.style.background=`linear-gradient(90deg,var(--accent) ${p}%,var(--border-md) ${p}%)`;
+}
+document.querySelectorAll('input[type=range]').forEach(syncSlider);
+
+/* ════════════════════════════════════════
+   5. DRAG & DROP + CLICK-TO-PICK
+════════════════════════════════════════ */
+let pickedFile = null;  // real File object → sent to /api/analyze
+
+(function(){
+  const zone=document.getElementById('drop-zone');
+
+  // Hidden <input type=file> so clicking the drop-zone opens the native picker.
+  const fi = document.createElement('input');
+  fi.type = 'file';
+  fi.accept = 'video/mp4,video/quicktime,video/webm,video/x-matroska,audio/mpeg,audio/wav';
+  fi.style.display = 'none';
+  zone.appendChild(fi);
+  zone.style.cursor = 'pointer';
+  zone.addEventListener('click', () => fi.click());
+  fi.addEventListener('change', () => {
+    if (fi.files && fi.files[0]) acceptFile(fi.files[0]);
+  });
+
+  zone.addEventListener('dragover',e=>{ e.preventDefault(); zone.classList.add('drag-over'); });
+  zone.addEventListener('dragleave',()=>zone.classList.remove('drag-over'));
+  zone.addEventListener('drop',e=>{
+    e.preventDefault(); zone.classList.remove('drag-over');
+    const file=e.dataTransfer.files[0];
+    if(file) acceptFile(file);
+  });
+
+  function acceptFile(file){
+    pickedFile = file;
+    document.getElementById('dz-title').textContent=`✓ ${file.name}`;
+    document.getElementById('dz-sub').textContent=`${(file.size/1024/1024).toFixed(2)} MB — ready to analyze`;
+    zone.style.borderColor='var(--accent)';
+  }
+})();
+
+/* Pull live server info into the footer on load. */
+(function(){
+  fetch('/api/health').then(r=>r.ok?r.json():null).then(h=>{
+    if(!h) return;
+    const dev = document.getElementById('sys-device');
+    const be  = document.getElementById('sys-backend');
+    if (dev) dev.textContent = (h.device || '—').toUpperCase();
+    if (be)  be.textContent  = 'PyTorch · ' + (h.device || 'cpu');
+  }).catch(()=>{});
+})();
+
+/* ════════════════════════════════════════
+   6. ADVANCED TOGGLE
+════════════════════════════════════════ */
+function toggleAdv(){
+  document.getElementById('adv-btn').classList.toggle('open');
+  document.getElementById('adv-body').classList.toggle('open');
+}
+
+/* ════════════════════════════════════════
+   7. ANALYSIS FLOW — wired to FastAPI /api/analyze
+════════════════════════════════════════ */
+const STEPS=[
+  'Normalizing video (rotation + codec)…',
+  'Loading detector weights…',
+  'Segmenting into 1s windows…',
+  'Running face detection (MTCNN)…',
+  'Scoring visual frames (ViT forgery head)…',
+  'Scoring audio windows (wav2vec2-LoRA)…',
+  'Fusing streams (late weighted)…',
+  'Assembling report…',
+];
+
+// Populated from the server response:
+let FLAGS   = [];
+let TL_SEGS = [];
+let FACES   = [];
+let TL_TOTAL = 1;        // total duration for the timeline X axis
+let LAST_REPORT = null;  // full response → used by downloadJSON()
+
+let busy=false;
+
+function runAnalysis(){
+  const url=document.getElementById('url-input').value.trim();
+  if(!url && !pickedFile){
+    const inp=document.getElementById('url-input');
+    inp.focus(); inp.style.borderColor='var(--red)';
+    setTimeout(()=>inp.style.borderColor='',1500);
+    return;
+  }
+  if(busy) return;
+  busy=true;
+
+  const btn=document.getElementById('btn-analyze');
+  const prog=document.getElementById('a-prog');
+  const run=document.getElementById('prog-run');
+  const status=document.getElementById('prog-status');
+
+  btn.disabled=true;
+  document.getElementById('btn-text').textContent='Analyzing…';
+  prog.classList.add('vis');
+
+  // Reset results
+  document.getElementById('res-empty').style.display='block';
+  document.getElementById('verdict').classList.remove('vis');
+  document.getElementById('metrics').classList.remove('vis');
+  document.getElementById('tl-wrap').classList.remove('vis');
+  document.getElementById('tbl-wrap').classList.remove('vis');
+  document.getElementById('ev-empty').style.display='block';
+  document.getElementById('ev-grid').classList.remove('vis');
+
+  // Cosmetic progress ticker — caps at 92% until the real response arrives.
+  let step=0;
+  const tick=setInterval(()=>{
+    step++;
+    const pct=Math.min(8+step*10,92);
+    run.style.width=pct+'%';
+    status.textContent=STEPS[Math.min(step,STEPS.length-1)];
+  },900);
+
+  // Build the multipart form for the backend.
+  const form=new FormData();
+  if(pickedFile) form.append('file', pickedFile);
+  if(url)        form.append('url', url);
+  form.append('threshold', (parseFloat(document.getElementById('v-thresh').textContent)||0.30).toString());
+  form.append('window',    (parseFloat(document.getElementById('v-win').textContent)||1.0).toString());
+
+  fetch('/api/analyze', { method:'POST', body: form })
+    .then(r => r.json().then(body => ({ ok:r.ok, body })))
+    .then(({ok, body}) => {
+      clearInterval(tick);
+      if(!ok || body.error){
+        status.textContent = 'Error: ' + (body.error || 'unknown');
+        status.style.color = 'var(--red)';
+        setTimeout(()=>{
+          prog.classList.remove('vis');
+          status.style.color = '';
+          btn.disabled=false;
+          document.getElementById('btn-text').textContent='Analyze';
+          busy=false;
+        }, 1800);
+        return;
+      }
+      run.style.width='100%';
+      status.textContent='Complete · '+body.total+' segments · '+body.duration_ts;
+      LAST_REPORT = body;
+      ingestReport(body);
+      setTimeout(()=>{
+        prog.classList.remove('vis');
+        btn.disabled=false;
+        document.getElementById('btn-text').textContent='Analyze';
+        busy=false;
+        showResults(body);
+      },450);
+    })
+    .catch(err => {
+      clearInterval(tick);
+      status.textContent = 'Network error: ' + err.message;
+      status.style.color = 'var(--red)';
+      setTimeout(()=>{
+        prog.classList.remove('vis');
+        status.style.color = '';
+        btn.disabled=false;
+        document.getElementById('btn-text').textContent='Analyze';
+        busy=false;
+      }, 1800);
+    });
+}
+
+/* Translate a /api/analyze response into the FLAGS / TL_SEGS / FACES arrays
+   that the existing render functions already know how to draw. */
+function ingestReport(r){
+  TL_TOTAL = Math.max(1, r.duration || (r.segments.length * (r.window_s || 1)));
+
+  // Flagged rows only, sorted by probability desc.
+  FLAGS = r.segments
+    .filter(s => s.flagged)
+    .sort((a,b) => (b.fused||0) - (a.fused||0))
+    .map(s => ({
+      start: s.start_ts,
+      end:   s.end_ts,
+      type:  s.type,
+      sev:   s.severity || 'low',
+      prob:  s.fused || 0,
+    }));
+
+  // Timeline bands — clean / flag / uncertain, spanning [0, TL_TOTAL].
+  TL_SEGS = (r.timeline || []).map(t => ({ s:t.s, e:t.e, type:t.type }));
+
+  // Face gallery — prefer real crops; fall back to gradient placeholder if none.
+  FACES = (r.faces || []).map(f => ({
+    lbl:     f.label,
+    flagged: !!f.flagged,
+    url:     f.id ? ('/api/face/' + f.id) : null,
+  }));
+
+  // Fill in the metric cards + verdict banner.
+  const pct = Math.round(100 * (r.fake_prob || 0));
+  const banner = document.getElementById('verdict');
+  const pill   = banner.querySelector('.v-pill');
+  const h4     = banner.querySelector('.v-text h4');
+  const p      = banner.querySelector('.v-text p');
+  const vpct   = banner.querySelector('.v-pct');
+  vpct.textContent = pct + '%';
+  if (r.verdict === 'tampered') {
+    banner.classList.add('tampered');   banner.classList.remove('authentic');
+    pill.textContent = 'Tampered';
+    h4.textContent   = 'Manipulation Detected';
+    p.textContent    = `${r.flagged} of ${r.total} segments flagged — ${r.duration_ts} analyzed`;
+  } else {
+    banner.classList.remove('tampered'); banner.classList.add('authentic');
+    pill.textContent = 'Authentic';
+    h4.textContent   = 'No Manipulation Detected';
+    p.textContent    = `${r.flagged} of ${r.total} segments flagged · below ${r.threshold.toFixed(2)} threshold`;
+  }
+
+  // Metrics grid
+  const cards = document.querySelectorAll('#metrics .m-card .m-val');
+  const subs  = document.querySelectorAll('#metrics .m-card .m-sub');
+  if (cards[0]) {
+    cards[0].textContent = (r.fake_prob||0).toFixed(2);
+    cards[0].style.color = r.fake_prob >= r.threshold ? 'var(--red)' : 'var(--green)';
+    subs[0].textContent  = (r.fake_prob >= r.threshold ? 'above' : 'below') + ` threshold (${r.threshold.toFixed(2)})`;
+  }
+  if (cards[1]) {
+    cards[1].textContent = r.flagged + ' / ' + r.total;
+    subs[1].textContent  = (100*r.flagged/Math.max(1,r.total)).toFixed(0) + '% of total duration';
+  }
+  if (cards[2]) {
+    const ai = r.audio_integrity;
+    cards[2].textContent = ai==null ? '—' : (Math.round(100*ai) + '%');
+    cards[2].style.color = ai==null ? 'var(--text-mid)' : (ai >= 0.7 ? 'var(--green)' : ai >= 0.4 ? 'var(--gold)' : 'var(--red)');
+    subs[2].textContent  = ai==null ? 'no audio track' : 'wav2vec2-LoRA mean';
+  }
+  if (cards[3]) {
+    const fc = r.face_confidence;
+    cards[3].textContent = fc==null ? '—' : (Math.round(100*fc) + '%');
+    cards[3].style.color = fc==null ? 'var(--text-mid)' : (fc >= 0.7 ? 'var(--green)' : fc >= 0.4 ? 'var(--gold)' : 'var(--red)');
+    subs[3].textContent  = fc==null ? 'no faces' : 'ViT-forgery mean';
+  }
+}
+
+function showResults(r){
+  document.getElementById('results').scrollIntoView({behavior:'smooth'});
+  setTimeout(()=>{
+    document.getElementById('res-empty').style.display='none';
+    document.getElementById('verdict').classList.add('vis');
+    document.getElementById('metrics').classList.add('vis');
+    document.getElementById('tl-wrap').classList.add('vis');
+    document.getElementById('tbl-wrap').classList.add('vis');
+    buildTimeline();
+    buildTable();
+    buildEvidence();
+  },450);
+}
+
+/* ════════════════════════════════════════
+   8. TIMELINE CANVAS
+════════════════════════════════════════ */
+function rrect(ctx,x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y); ctx.lineTo(x+w-r,y);
+  ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+  ctx.lineTo(x+w,y+h-r);
+  ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  ctx.lineTo(x+r,y+h);
+  ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+  ctx.lineTo(x,y+r);
+  ctx.quadraticCurveTo(x,y,x+r,y);
+  ctx.closePath();
+}
+
+function buildTimeline(){
+  const canvas=document.getElementById('tl-canvas');
+  const dpr=window.devicePixelRatio||1;
+  const W=canvas.parentElement.clientWidth-44, H=74;
+  canvas.style.width=W+'px'; canvas.style.height=H+'px';
+  canvas.width=W*dpr; canvas.height=H*dpr;
+  const ctx=canvas.getContext('2d');
+  ctx.scale(dpr,dpr);
+
+  const total=Math.max(1, TL_TOTAL), trackH=26, trackY=(H-trackH)/2, R=5;
+
+  function render(hoverX){
+    ctx.clearRect(0,0,W,H);
+    ctx.fillStyle='rgba(255,255,255,0.04)';
+    rrect(ctx,0,trackY,W,trackH,R); ctx.fill();
+
+    TL_SEGS.forEach(seg=>{
+      const x=(seg.s/total)*W, sw=Math.max(1,((seg.e-seg.s)/total)*W);
+      ctx.fillStyle= seg.type==='clean'?'rgba(62,201,134,0.55)': seg.type==='flag'?'rgba(224,82,82,0.72)':'rgba(212,168,83,0.60)';
+      ctx.fillRect(x,trackY,sw,trackH);
+    });
+
+    // Playhead
+    ctx.fillStyle='rgba(255,255,255,0.85)';
+    ctx.fillRect(0,trackY-2,2,trackH+4);
+
+    if(hoverX!==null){
+      ctx.fillStyle='rgba(255,255,255,0.6)';
+      ctx.fillRect(hoverX-1,trackY-3,2,trackH+6);
+      const sec=Math.round((hoverX/W)*total);
+      const mm=Math.floor(sec/60), ss=String(sec%60).padStart(2,'0');
+      const tx=`${mm}:${ss}`;
+      ctx.fillStyle='rgba(11,14,21,0.92)';
+      rrect(ctx,Math.min(hoverX+6,W-46),trackY-22,42,16,3); ctx.fill();
+      ctx.fillStyle='#EDF0F5'; ctx.font=`10px 'JetBrains Mono',monospace`;
+      ctx.fillText(tx,Math.min(hoverX+9,W-43),trackY-10);
+    }
+  }
+
+  render(null);
+
+  canvas.onmousemove = e => {
+    const r=canvas.getBoundingClientRect();
+    render(e.clientX-r.left);
+  };
+  canvas.onmouseleave = ()=>render(null);
+
+  // Ticks — 6 evenly spaced + endpoints
+  const ticks=document.getElementById('tl-ticks');
+  ticks.innerHTML='';
+  const stops = [0, 0.2, 0.4, 0.6, 0.8, 1.0].map(f => Math.round(total*f));
+  stops.forEach(s=>{
+    const sp=document.createElement('span');
+    const mm=Math.floor(s/60), ss=String(s%60).padStart(2,'0');
+    sp.textContent=`${mm}:${ss}`;
+    ticks.appendChild(sp);
+  });
+}
+
+/* ════════════════════════════════════════
+   9. TABLE
+════════════════════════════════════════ */
+function buildTable(){
+  const body=document.getElementById('tbl-body');
+  body.innerHTML='';
+  FLAGS.forEach(row=>{
+    const d=document.createElement('div');
+    d.className='t-row';
+    d.innerHTML=`
+      <span class="t-time">${row.start}</span>
+      <span class="t-time">${row.end}</span>
+      <span style="font-size:12px;color:var(--text-mid)">${row.type}</span>
+      <span><span class="sev-chip ${row.sev}">${row.sev[0].toUpperCase()+row.sev.slice(1)}</span></span>
+      <span class="prob-cell">
+        <div class="prob-mini"><div class="prob-mini-fill" style="width:${(row.prob*100).toFixed(0)}%"></div></div>
+        <span style="font-family:var(--font-m);font-size:11px;color:var(--red);flex-shrink:0">${row.prob.toFixed(2)}</span>
+      </span>`;
+    body.appendChild(d);
+  });
+}
+
+/* ════════════════════════════════════════
+   10. EVIDENCE VIEWER
+════════════════════════════════════════ */
+const GRADS=[
+  'linear-gradient(135deg,#1a0e08,#3a2010)',
+  'linear-gradient(135deg,#0e1228,#1e2448)',
+  'linear-gradient(135deg,#180e0e,#3c1818)',
+  'linear-gradient(135deg,#0c1814,#1a3028)',
+  'linear-gradient(135deg,#160e1a,#2e1c38)',
+  'linear-gradient(135deg,#101018,#20203a)',
+];
+
+function buildEvidence(){
+  document.getElementById('ev-empty').style.display='none';
+  document.getElementById('ev-grid').classList.add('vis');
+  const grid=document.getElementById('face-grid');
+  grid.innerHTML='';
+  if(!FACES.length){
+    const div=document.createElement('div');
+    div.style.cssText='grid-column:1/-1;color:var(--text-mid);font-size:12px;padding:10px 0';
+    div.textContent='No face crops captured for this clip.';
+    grid.appendChild(div);
+    return;
+  }
+  FACES.forEach((f,i)=>{
+    const div=document.createElement('div');
+    div.className='face-thumb'+(f.flagged?' flagged':'');
+    const inner = f.url
+      ? `<div class="face-inner" style="background:#000;background-image:url('${f.url}');background-size:cover;background-position:center"></div>`
+      : `<div class="face-inner" style="background:${GRADS[i%GRADS.length]}">👤</div>`;
+    div.innerHTML=`${inner}<div class="face-lbl">${f.lbl}</div>`;
+    grid.appendChild(div);
+  });
+  // Update the video placeholder line with the real filename.
+  if (LAST_REPORT && LAST_REPORT.video) {
+    const vh = document.querySelector('#vid-ph span');
+    if (vh) vh.textContent = `${LAST_REPORT.video} · ${LAST_REPORT.duration_ts}`;
+  }
+}
+
+/* ════════════════════════════════════════
+   11. FAQ
+════════════════════════════════════════ */
+const FAQS=[
+  {q:'What models does Verity use for detection?',a:'The visual branch is a Vision Transformer forgery classifier (derived from prithivMLmods/Deep-Fake-Detector-Model) run over MTCNN face crops. The audio branch is a wav2vec2 encoder fine-tuned on ASVspoof 2019 LA with LoRA adapters (r=8, α=16). The two streams are combined with a weighted late-fusion head (video=0.8, audio=0.2).'},
+  {q:'How does segment-level detection work?',a:'The input is chunked into 1-second non-overlapping windows. Each window produces an independent video score and audio score. Fusion gives a per-segment fake probability, which is thresholded to localize exactly *when* the tampering happens — not just a single clip-level verdict.'},
+  {q:'What file formats and sources are supported?',a:'Upload .mp4, .mov, .webm, .mkv, .mp3, or .wav, or paste a URL — YouTube, Instagram, TikTok, Twitter/X and direct media links all work (fetched via yt-dlp). Rotation metadata is normalized before inference so iPhone and WhatsApp clips aren\u2019t decoded upside-down.'},
+  {q:'Is my uploaded media stored or retained?',a:'Files are kept only long enough to run inference and serve the flagged face crops back to this UI. Nothing is logged off the local machine and no content is used for training.'},
+  {q:'What does the detection threshold control?',a:'It\u2019s the minimum fused fake-probability required to flag a segment as tampered. Lower values catch more but raise false positives. The default (τ = 0.30) was chosen on the held-out ASVspoof LA dev set; move it with the slider to re-flag without re-running inference.'},
+];
+
+(function(){
+  const list=document.getElementById('faq-list');
+  FAQS.forEach(item=>{
+    const d=document.createElement('div');
+    d.className='faq-item';
+    d.innerHTML=`<div class="faq-q"><h4>${item.q}</h4><div class="faq-chev">▾</div></div><div class="faq-a"><p>${item.a}</p></div>`;
+    d.querySelector('.faq-q').addEventListener('click',()=>{
+      const wasOpen=d.classList.contains('open');
+      document.querySelectorAll('.faq-item').forEach(el=>el.classList.remove('open'));
+      if(!wasOpen) d.classList.add('open');
+    });
+    list.appendChild(d);
+  });
+})();
+
+/* ════════════════════════════════════════
+   12. DOWNLOAD JSON
+════════════════════════════════════════ */
+function downloadJSON(){
+  if(!LAST_REPORT){
+    alert('Run an analysis first.');
+    return;
+  }
+  const payload = Object.assign(
+    { analyzed_at: new Date().toISOString() },
+    LAST_REPORT,
+  );
+  const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='verity_report_'+(LAST_REPORT.video||'clip').replace(/\.[^.]+$/,'')+'.json';
+  a.click();
+}
+</script>
+</body>
+</html>

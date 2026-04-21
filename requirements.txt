@@ -35,6 +35,11 @@ timm>=0.9
 gradio>=4.44
 plotly>=5.20
 
+# Verity web frontend (FastAPI backend for static/index.html)
+fastapi>=0.110
+uvicorn[standard]>=0.27
+python-multipart>=0.0.9
+
 # Fine-tuning (optional — only needed for scripts/train_audio.py etc.)
 peft>=0.10
 accelerate>=0.30

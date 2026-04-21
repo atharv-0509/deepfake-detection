@@ -163,6 +163,52 @@ on the next analysis.
 
 ---
 
+## Web UI (Verity — FastAPI + static HTML)
+
+A second, more polished frontend lives at `static/index.html` with a
+custom dark dashboard ("Verity"). It's served by a thin FastAPI backend
+(`server.py`) that reuses the exact same `DeepfakePipeline` as the
+CLI and Gradio app — no duplicate inference code.
+
+```bash
+# one-time install of the new extras:
+pip install -r requirements.txt       # now also installs fastapi + uvicorn + python-multipart
+
+# local dev server (auto-reload on file changes):
+uvicorn server:app --host 0.0.0.0 --port 8000 --reload
+# -> open http://127.0.0.1:8000
+```
+
+The UI exposes the same capabilities as the Gradio app:
+
+- drag-and-drop or click-to-pick file upload,
+- URL paste field (YouTube / Instagram / TikTok / Twitter / direct mp4
+  or mp3 — fetched via yt-dlp),
+- detection-threshold and segment-window sliders, plus an
+  "advanced options" panel (audio spectral toggle, face-crop tracking,
+  model-backbone select),
+- a custom-drawn per-segment timeline with clean / flagged /
+  uncertain bands and hover-readout,
+- a flagged-segments table with severity chips and probability bars,
+- a face-crop grid populated from `/api/face/<id>` (real JPEGs saved
+  during inference),
+- a JSON-export button that dumps the full per-segment report.
+
+### HTTP endpoints
+
+| Method | Path                | Purpose                                                              |
+| ------ | ------------------- | -------------------------------------------------------------------- |
+| GET    | `/`                 | Serves `static/index.html`                                           |
+| GET    | `/api/health`       | `{status, device, pipeline_loaded}` — polled on page load             |
+| POST   | `/api/analyze`      | Multipart: `file` or `url`, plus `threshold`, `window`, weights      |
+| GET    | `/api/face/{id}`    | Serves a face-crop JPEG by its generated ID                          |
+
+The `/api/analyze` response is shaped for the frontend (see `server._shape_response`
+for the exact schema) and contains `verdict`, `fake_prob`, `flagged`, `total`,
+per-segment probabilities, timeline bands, and face-crop IDs.
+
+---
+
 ## Models used (pretrained, open-source)
 
 | Stream | Model                                                 | Notes                                                                 |

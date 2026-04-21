@@ -361,6 +361,114 @@ iterate.
 
 ---
 
+## Fine-tuning on WaveFake / LJSpeech (neural-vocoder fakes)
+
+ASVspoof 2019 LA focuses on TTS and voice-conversion attacks. It under-
+represents the more recent failure mode of raw neural vocoders
+(HiFi-GAN, MelGAN, Parallel WaveGAN, WaveGlow) emitting nearly-clean
+speech that no longer carries conventional vocoder artefacts. The
+[WaveFake](https://zenodo.org/records/5642694) corpus (Frank & Schönherr,
+2021) fills that gap with ~100k utterances from 7+ neural vocoders using
+[LJSpeech 1.1](https://keithito.com/LJ-Speech-Dataset/) as the base
+speech.
+
+Fine-tuning on WaveFake gives the audio branch a second specialised head
+for modern vocoder spoofing — complementary to, not a replacement for,
+the ASVspoof checkpoint. Use whichever matches your threat model, or
+run both and ensemble.
+
+### 1. Expected dataset layout
+
+After downloading WaveFake from Zenodo and LJSpeech-1.1 from the Keith
+Ito mirror:
+
+```
+<wavefake-root>/
+├── ljspeech_melgan/*.wav
+├── ljspeech_hifiGAN/*.wav
+├── ljspeech_parallel_wavegan/*.wav
+├── ljspeech_full_band_melgan/*.wav
+├── ljspeech_multi_band_melgan/*.wav
+├── ljspeech_melgan_large/*.wav
+├── ljspeech_waveglow/*.wav
+└── (optionally) jsut_*              # Japanese, off by default
+
+<ljspeech-root>/LJSpeech-1.1/
+├── wavs/LJ###-####.wav              # 13,100 real clips
+└── metadata.csv
+```
+
+Total on-disk footprint: WaveFake ≈ 25 GB, LJSpeech ≈ 2.6 GB.
+
+### 2. Build manifests
+
+```bash
+python scripts/prepare_wavefake.py \
+    --wavefake-root /data/wavefake \
+    --ljspeech-root /data/LJSpeech-1.1 \
+    --out-dir data/wavefake \
+    --per-vocoder-cap 2000     # optional — cap per-vocoder for speed
+    --balance                  # optional — match real count to total fake
+```
+
+Writes `data/wavefake/wavefake_{train,dev,test}.csv` with the same
+`(file_path, label, spoof_type, speaker_id, split)` schema as the
+ASVspoof manifests, so `ASVspoofDataset` / `train_audio.py` consume
+them without changes. `spoof_type` is set to the vocoder name
+(`melgan`, `hifiGAN`, `parallel_wavegan`, …) so per-vocoder EER can
+be computed the same way ASVspoof reports per-attack EER.
+
+Split is 80/10/10 stratified by `(label, spoof_type)`. Pass
+`--check-only` to scan the layout and print counts without writing
+anything.
+
+### 3. Train (LoRA fine-tune)
+
+Use `--train-csv` / `--dev-csv` to point `train_audio.py` at the
+WaveFake manifests instead of the ASVspoof default:
+
+```bash
+python scripts/train_audio.py \
+    --train-csv data/wavefake/wavefake_train.csv \
+    --dev-csv   data/wavefake/wavefake_dev.csv \
+    --output-dir checkpoints/audio-wavefake-lora \
+    --epochs 6 \
+    --batch-size 32 \
+    --lr 3e-4 \
+    --bf16
+```
+
+Same LoRA recipe as the ASVspoof path (r=8, α=16, ~0.5% trainable).
+Wall-clock is similar: ~2–3 h on an A100 for 6 epochs over a
+`--per-vocoder-cap 2000` subset.
+
+### 4. Evaluate
+
+```bash
+python scripts/eval_audio.py \
+    --model-path checkpoints/audio-wavefake-lora/merged \
+    --manifest   data/wavefake/wavefake_test.csv \
+    --out        out/audio_wavefake_eval.json
+```
+
+Reports EER / ROC-AUC / PR-AUC and a per-vocoder EER breakdown in the
+same shape as the ASVspoof eval script.
+
+### 5. Plug into the inference pipeline
+
+Edit `configs/default.yaml` to point at the WaveFake-tuned weights (or
+the ASVspoof ones — they're interchangeable):
+
+```yaml
+audio:
+  model_id: /abs/path/to/checkpoints/audio-wavefake-lora/merged
+```
+
+Runtime inference (`run_inference.py`, Gradio app, Verity web UI) is
+unchanged — the pipeline just loads different weights.
+
+---
+
 ## Limitations & honest notes
 
 - The off-the-shelf HF models are **general-purpose** deepfake detectors.

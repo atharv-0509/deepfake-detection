@@ -79,13 +79,25 @@ Deepfake detection/
 │   ├── audio_detector.py     # Wav2Vec2 spoof detector
 │   ├── fusion.py             # late-fusion of the two streams
 │   ├── pipeline.py           # orchestrator
-│   └── utils.py              # ffmpeg I/O, logging, device mgmt
+│   ├── utils.py              # ffmpeg I/O, logging, device mgmt
+│   └── training/
+│       ├── asvspoof_dataset.py    # whole-file 1s-crop dataset
+│       ├── segment_labeling.py    # fake-interval → per-window label math
+│       └── segment_dataset.py     # segment-level (partial-spoof) dataset
 ├── scripts/
-│   ├── run_inference.py      # CLI: video in -> timeline JSON out
-│   ├── download_datasets.py  # FaceForensics++, DFDC, ASVspoof helpers
-│   └── evaluate.py           # segment-level AP / F1 on a dataset
+│   ├── run_inference.py         # CLI: video in -> timeline JSON out
+│   ├── prepare_asvspoof.py      # build whole-file manifests (ASVspoof)
+│   ├── prepare_wavefake.py      # build whole-file manifests (WaveFake)
+│   ├── make_partialspoof.py     # splice partial-spoof + segment manifest
+│   ├── train_audio.py           # whole-file LoRA fine-tune
+│   ├── train_audio_segments.py  # segment-wise LoRA fine-tune
+│   ├── eval_audio.py            # EER / per-attack breakdown
+│   └── evaluate.py              # segment-level AP / F1 on a dataset
+├── notebooks/
+│   └── kaggle_segment_train.ipynb  # end-to-end segment-wise training
 └── tests/
-    └── test_pipeline.py      # smoke tests with a synthetic clip
+    ├── test_pipeline.py         # smoke tests with a synthetic clip
+    └── test_segment_labeling.py # per-window labelling unit tests
 ```
 
 ---
@@ -466,6 +478,88 @@ audio:
 
 Runtime inference (`run_inference.py`, Gradio app, Verity web UI) is
 unchanged — the pipeline just loads different weights.
+
+---
+
+## Segment-wise (partial-spoof) fine-tuning — stop "falsifying the whole thing"
+
+Both fine-tuning recipes above train on **whole-file** labels: every clip in
+ASVspoof / WaveFake is *entirely* bonafide or *entirely* spoof. Even though
+`train_audio.py` random-crops 1-second windows, each window inherits the
+file's single label, so the model only ever learns an **utterance-level**
+question — *"is this whole recording synthetic?"*. Fed a partially manipulated
+clip (real speech with a few overdubbed words), it collapses to one verdict
+and flags the whole thing.
+
+The inference pipeline already scores every 1s window independently — the gap
+is in the **training signal**. To get true segment-level discrimination the
+model has to see files where real and fake audio coexist, with per-segment
+ground truth. This repo builds that data for you and trains on it.
+
+```
+whole-file manifest          synth partial-spoof            segment-level train
+(ASVspoof / WaveFake)   ──►   real+fake spliced       ──►   per-window labels,
+label per FILE                per-interval labels           LoRA refine on top
+```
+
+### 1. Synthesize partial-spoof data
+
+`scripts/make_partialspoof.py` splices bonafide + spoof chunks from an existing
+whole-file manifest into single clips and writes a **segment-level manifest**
+(`file_path,duration,fake_segments,speaker_id,source`), where `fake_segments`
+is a `;`-separated list of `start-end` seconds (empty = fully real). It also
+adds pass-through originals so fully-real / fully-fake examples stay in the mix.
+
+```bash
+python scripts/make_partialspoof.py \
+    --manifest data/asvspoof/asvspoof_train.csv \
+    --out-dir data/partialspoof/train --name partial_train \
+    --n-partial 6000 --seed 42
+
+python scripts/make_partialspoof.py \
+    --manifest data/asvspoof/asvspoof_dev.csv \
+    --out-dir data/partialspoof/dev --name partial_dev \
+    --n-partial 1000 --seed 7
+```
+
+### 2. Train segment-wise (LoRA, refines your existing model)
+
+`scripts/train_audio_segments.py` enumerates fixed 1s windows across every
+file and labels each by its overlap with the fake intervals
+(`--positive-overlap`, default 0.5). `--model-id` accepts the stock base **or
+a `merged/` dir from a previous run** — the segment adapter stacks on top of
+your existing ASVspoof/WaveFake LoRA. Pass several `--train-csv` to combine
+partial data from multiple source datasets.
+
+```bash
+python scripts/train_audio_segments.py \
+    --model-id checkpoints/audio-asvspoof-lora/merged \
+    --train-csv data/partialspoof/train/partial_train.csv \
+    --dev-csv   data/partialspoof/dev/partial_dev.csv \
+    --output-dir checkpoints/audio-partial-lora \
+    --epochs 5 --batch-size 32 --lr 3e-4 --lora-r 16 --bf16
+```
+
+Dev metrics are reported at the **window** level (segment-F1, ROC-AUC, EER),
+and the best checkpoint (by EER) is merged into
+`checkpoints/audio-partial-lora/merged/`. Point `configs/default.yaml` at it
+exactly like the other recipes.
+
+### On Kaggle
+
+`notebooks/kaggle_segment_train.ipynb` runs the whole loop end-to-end (prepare
+→ synthesize → train → per-window sanity check → export) against an ASVspoof or
+WaveFake dataset attached to the notebook. Enable GPU + Internet and edit the
+dataset paths in the first data cell.
+
+### Better ground truth (optional)
+
+The splicing above is a pragmatic way to manufacture segment labels from data
+you already have. If you have access to a natively segment-labelled corpus
+(**PartialSpoof**, **HAD / Half-truth Audio Detection**, or the audio track of
+**LAV-DF / AV-Deepfake1M**), you can skip step 1 and feed its per-utterance
+fake intervals straight into the same manifest schema — `train_audio_segments.py`
+consumes it unchanged.
 
 ---
 
